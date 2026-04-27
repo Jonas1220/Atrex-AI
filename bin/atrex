@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── Atrex AI CLI ──────────────────────────────────────────────────────────────
+# Usage: atrex <command>
+# Commands: start, stop, restart, status, logs, update, open, setup, help
+
+CONFIG_DIR="$HOME/.atrex"
+CONFIG_FILE="$CONFIG_DIR/config"
+PID_FILE="$CONFIG_DIR/agent.pid"
+APP_NAME="atrex-ai"
+
+# ── Colors ────────────────────────────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+AMBER='\033[0;33m'
+CYAN='\033[0;36m'
+RESET='\033[0m'
+
+ok()   { echo -e "  ${GREEN}✓${RESET}  $1"; }
+info() { echo -e "  ${CYAN}→${RESET}  $1"; }
+warn() { echo -e "  ${AMBER}!${RESET}  $1"; }
+fail() { echo -e "  ${RED}✗${RESET}  $1"; exit 1; }
+
+# ── Resolve install directory ─────────────────────────────────────────────────
+INSTALL_DIR=""
+
+# 1. From config file (written by install.sh)
+if [ -f "$CONFIG_FILE" ]; then
+  INSTALL_DIR=$(grep "^INSTALL_DIR=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 || true)
+fi
+
+# 2. Follow the symlink back to the real script location
+if [ -z "$INSTALL_DIR" ] || [ ! -d "$INSTALL_DIR" ]; then
+  SCRIPT_SRC="${BASH_SOURCE[0]}"
+  while [ -L "$SCRIPT_SRC" ]; do
+    SCRIPT_SRC="$(readlink "$SCRIPT_SRC")"
+  done
+  INSTALL_DIR="$(cd "$(dirname "$SCRIPT_SRC")/.." && pwd)"
+fi
+
+if [ ! -f "$INSTALL_DIR/package.json" ]; then
+  fail "Could not locate Atrex AI installation. Run the installer again."
+fi
+
+# ── PM2 detection ─────────────────────────────────────────────────────────────
+HAS_PM2=false
+if command -v pm2 &>/dev/null; then
+  HAS_PM2=true
+fi
+
+# ── Process helpers ───────────────────────────────────────────────────────────
+is_running_pm2() {
+  pm2 list 2>/dev/null | grep -q "$APP_NAME" && \
+  pm2 list 2>/dev/null | grep "$APP_NAME" | grep -q "online"
+}
+
+is_running_pid() {
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+is_running() {
+  if [ "$HAS_PM2" = true ]; then
+    is_running_pm2
+  else
+    is_running_pid
+  fi
+}
+
+get_port() {
+  grep "^WEB_ADMIN_PORT=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d'=' -f2 || echo "3000"
+}
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+cmd_start() {
+  if is_running; then
+    warn "Atrex AI is already running. Use ${BOLD}atrex restart${RESET} to restart."
+    return
+  fi
+
+  info "Starting Atrex AI…"
+
+  if [ "$HAS_PM2" = true ]; then
+    cd "$INSTALL_DIR"
+    if [ -f "ecosystem.config.js" ]; then
+      pm2 start ecosystem.config.js --silent
+    else
+      pm2 start dist/index.js --name "$APP_NAME" --silent
+    fi
+    ok "Started with PM2"
+    info "Run ${BOLD}pm2 save${RESET} to persist across reboots"
+  else
+    mkdir -p "$CONFIG_DIR"
+    cd "$INSTALL_DIR"
+    nohup node dist/index.js >> "$CONFIG_DIR/agent.log" 2>&1 &
+    echo $! > "$PID_FILE"
+    ok "Started (PID $(cat "$PID_FILE"))"
+    info "Logs: $CONFIG_DIR/agent.log"
+  fi
+
+  local PORT
+  PORT=$(get_port)
+  info "Dashboard → http://localhost:${PORT}"
+}
+
+cmd_stop() {
+  if ! is_running; then
+    warn "Atrex AI is not running."
+    return
+  fi
+
+  info "Stopping Atrex AI…"
+
+  if [ "$HAS_PM2" = true ]; then
+    pm2 stop "$APP_NAME" --silent
+    ok "Stopped"
+  else
+    if [ -f "$PID_FILE" ]; then
+      kill "$(cat "$PID_FILE")" 2>/dev/null || true
+      rm -f "$PID_FILE"
+      ok "Stopped"
+    fi
+  fi
+}
+
+cmd_restart() {
+  info "Restarting Atrex AI…"
+
+  if [ "$HAS_PM2" = true ]; then
+    if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+      pm2 restart "$APP_NAME" --silent
+    else
+      cmd_start
+      return
+    fi
+    ok "Restarted"
+  else
+    cmd_stop
+    sleep 1
+    cmd_start
+  fi
+}
+
+cmd_status() {
+  echo ""
+  echo -e "  ${BOLD}Atrex AI${RESET}"
+  echo -e "  ${DIM}Install: $INSTALL_DIR${RESET}"
+  echo ""
+
+  if is_running; then
+    echo -e "  Status   ${GREEN}● online${RESET}"
+  else
+    echo -e "  Status   ${DIM}○ offline${RESET}"
+  fi
+
+  if [ "$HAS_PM2" = true ] && pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+    echo ""
+    pm2 show "$APP_NAME" 2>/dev/null | grep -E "status|uptime|memory|cpu|restarts" | \
+      sed 's/^/  /' || true
+  elif [ -f "$PID_FILE" ]; then
+    local PID
+    PID=$(cat "$PID_FILE")
+    echo -e "  PID      $PID"
+  fi
+
+  local PORT
+  PORT=$(get_port)
+  echo -e "  Dashboard  http://localhost:${PORT}"
+  echo ""
+}
+
+cmd_logs() {
+  local LINES="${2:-80}"
+
+  if [ "$HAS_PM2" = true ] && pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+    pm2 logs "$APP_NAME" --lines "$LINES"
+    return
+  fi
+
+  # Fall back to log files in the install dir
+  local LOGS_DIR="$INSTALL_DIR/logs"
+  if [ ! -d "$LOGS_DIR" ]; then
+    fail "No logs directory found at $LOGS_DIR"
+  fi
+
+  local LATEST
+  LATEST=$(ls -t "$LOGS_DIR"/*.log 2>/dev/null | head -1 || true)
+  if [ -z "$LATEST" ]; then
+    warn "No log files found yet."
+    return
+  fi
+
+  info "Tailing $LATEST"
+  tail -f "$LATEST"
+}
+
+cmd_update() {
+  info "Updating Atrex AI…"
+  echo ""
+
+  cd "$INSTALL_DIR"
+
+  info "Pulling latest changes…"
+  git pull origin main
+
+  info "Installing dependencies…"
+  npm install --silent
+
+  info "Building…"
+  npm run build --silent
+
+  ok "Update complete"
+
+  if is_running; then
+    info "Restarting agent…"
+    cmd_restart
+  else
+    info "Run ${BOLD}atrex start${RESET} to start the updated agent."
+  fi
+}
+
+cmd_open() {
+  local PORT
+  PORT=$(get_port)
+  local URL="http://localhost:${PORT}"
+  info "Opening $URL"
+
+  if command -v xdg-open &>/dev/null; then
+    xdg-open "$URL"
+  elif command -v open &>/dev/null; then
+    open "$URL"
+  else
+    info "Visit: $URL"
+  fi
+}
+
+cmd_setup() {
+  if ! is_running; then
+    info "Starting in setup mode…"
+    cmd_start
+    sleep 1
+  fi
+  cmd_open
+}
+
+cmd_token() {
+  local ENV_FILE="$INSTALL_DIR/.env"
+  if [ ! -f "$ENV_FILE" ]; then
+    fail ".env not found. Start the agent once to generate a token."
+  fi
+  local TOKEN
+  TOKEN=$(grep "^WEB_ADMIN_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 || true)
+  if [ -z "$TOKEN" ]; then
+    warn "No admin token found. Start the agent first — it will be generated automatically."
+    return
+  fi
+  echo ""
+  echo -e "  ${BOLD}Admin Token${RESET}"
+  echo -e "  ${CYAN}${TOKEN}${RESET}"
+  echo ""
+  echo -e "  ${DIM}Use this to authenticate with the web dashboard.${RESET}"
+  echo ""
+}
+
+cmd_help() {
+  echo ""
+  echo -e "  ${BOLD}${AMBER}atrex${RESET} — Atrex AI CLI"
+  echo ""
+  echo -e "  ${BOLD}Usage:${RESET} atrex <command>"
+  echo ""
+  echo -e "  ${BOLD}Commands:${RESET}"
+  echo -e "    ${AMBER}start${RESET}      Start the agent in the background"
+  echo -e "    ${AMBER}stop${RESET}       Stop the agent"
+  echo -e "    ${AMBER}restart${RESET}    Restart the agent"
+  echo -e "    ${AMBER}status${RESET}     Show running status and uptime"
+  echo -e "    ${AMBER}logs${RESET}       Tail live log output"
+  echo -e "    ${AMBER}update${RESET}     Pull latest code and restart"
+  echo -e "    ${AMBER}open${RESET}       Open the web dashboard in your browser"
+  echo -e "    ${AMBER}setup${RESET}      Start the agent and open the onboarding wizard"
+  echo -e "    ${AMBER}token${RESET}      Show the web dashboard admin token"
+  echo -e "    ${AMBER}help${RESET}       Show this message"
+  echo ""
+  echo -e "  ${DIM}Install dir: $INSTALL_DIR${RESET}"
+  echo ""
+}
+
+# ── Router ────────────────────────────────────────────────────────────────────
+COMMAND="${1:-help}"
+
+case "$COMMAND" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_restart ;;
+  status)  cmd_status ;;
+  logs)    cmd_logs "$@" ;;
+  update)  cmd_update ;;
+  open)    cmd_open ;;
+  setup)   cmd_setup ;;
+  token)   cmd_token ;;
+  help|--help|-h) cmd_help ;;
+  *)
+    echo -e "  ${RED}Unknown command:${RESET} $COMMAND"
+    cmd_help
+    exit 1
+    ;;
+esac

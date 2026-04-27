@@ -1,0 +1,11 @@
+node_modules/
+dist/
+logs/
+memory/
+.env
+config/secrets.json
+config/soul.md
+config/user.md
+config/schedules.json
+plugins/*/index.js
+.DS_Store

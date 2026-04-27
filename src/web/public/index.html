@@ -1,0 +1,2672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Atrex AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ── Reset ─────────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Design tokens ──────────────────────────────────────────────────────── */
+    :root {
+      --bg:          #070708;
+      --surface:     #0d0d0f;
+      --surface-2:   #121215;
+      --surface-3:   #17171b;
+      --border:      #1e1e23;
+      --border-2:    #28282f;
+      --text:        #edeae0;
+      --text-2:      #b8b4a8;
+      --muted:       #5a5754;
+      --amber:       #e8a020;
+      --amber-soft:  #c88810;
+      --amber-glow:  rgba(232, 160, 32, 0.12);
+      --amber-dim:   rgba(232, 160, 32, 0.06);
+      --green:       #3ddc97;
+      --red:         #f55555;
+      --sidebar-w:   252px;
+      --topbar-h:    58px;
+      --sans:        "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+      --display:     "Bebas Neue", "Impact", "Arial Narrow", sans-serif;
+      --mono:        "IBM Plex Mono", "Cascadia Code", "Menlo", monospace;
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Grain overlay */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.028;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 220px 220px;
+    }
+
+    /* Ambient glow — top-left corner */
+    body::before {
+      content: '';
+      position: fixed; top: -250px; left: -150px;
+      width: 700px; height: 700px;
+      background: radial-gradient(circle, rgba(232,160,32,0.055) 0%, transparent 65%);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Auth overlay ──────────────────────────────────────────────────────── */
+    #auth-overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    #auth-overlay.hidden { display: none; }
+
+    .auth-card {
+      width: 380px;
+      animation: fadeUp 0.4s ease-out;
+    }
+
+    .auth-logo {
+      font-family: var(--display);
+      font-size: 52px;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      margin-bottom: 6px;
+      line-height: 1;
+    }
+
+    .auth-sub {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+    }
+
+    .auth-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .auth-input {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+      margin-bottom: 14px;
+    }
+    .auth-input:focus { border-color: var(--amber); }
+
+    #auth-error {
+      font-size: 12px;
+      color: var(--red);
+      margin-top: 10px;
+    }
+    #auth-error.hidden { display: none; }
+
+    /* ── App shell ──────────────────────────────────────────────────────────── */
+    #app { display: flex; height: 100vh; position: relative; z-index: 1; }
+    #app.hidden { display: none; }
+
+    /* ── Sidebar ────────────────────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      flex-shrink: 0;
+      overflow-y: auto;
+      position: relative;
+      z-index: 2;
+    }
+
+    .sidebar-brand {
+      padding: 28px 22px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-wordmark {
+      font-family: var(--display);
+      font-size: 30px;
+      letter-spacing: 0.1em;
+      color: var(--text);
+      line-height: 1;
+      margin-bottom: 10px;
+    }
+
+    .brand-status {
+      display: flex; align-items: center; gap: 7px;
+    }
+
+    .brand-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 0 rgba(61, 220, 151, 0.4);
+      flex-shrink: 0;
+      animation: pulse-green 2.4s ease-in-out infinite;
+    }
+    .brand-dot.offline {
+      background: var(--red);
+      box-shadow: none;
+      animation: none;
+    }
+
+    @keyframes pulse-green {
+      0%   { box-shadow: 0 0 0 0   rgba(61, 220, 151, 0.45); }
+      60%  { box-shadow: 0 0 0 5px rgba(61, 220, 151, 0);    }
+      100% { box-shadow: 0 0 0 0   rgba(61, 220, 151, 0);    }
+    }
+
+    .brand-status-text {
+      font-size: 11px; color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* Nav */
+    nav { padding: 14px 0; flex: 1; }
+
+    .nav-group { margin-bottom: 4px; }
+
+    .nav-section {
+      font-family: var(--display);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      padding: 12px 22px 5px;
+    }
+
+    .nav-item {
+      display: flex; align-items: center;
+      padding: 7px 22px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13.5px;
+      font-weight: 400;
+      transition: color 0.15s;
+      user-select: none;
+      position: relative;
+      letter-spacing: 0.01em;
+    }
+    .nav-item::before {
+      content: '';
+      position: absolute; left: 0; top: 50%;
+      transform: translateY(-50%) scaleY(0);
+      width: 2px; height: 60%;
+      background: var(--amber);
+      border-radius: 0 2px 2px 0;
+      transition: transform 0.2s ease, opacity 0.2s;
+      opacity: 0;
+    }
+    .nav-item:hover { color: var(--text-2); }
+    .nav-item.active {
+      color: var(--amber);
+      font-weight: 500;
+    }
+    .nav-item.active::before {
+      transform: translateY(-50%) scaleY(1);
+      opacity: 1;
+    }
+
+    /* ── Main area ──────────────────────────────────────────────────────────── */
+    #main {
+      flex: 1; display: flex; flex-direction: column;
+      overflow: hidden; min-width: 0;
+    }
+
+    #topbar {
+      height: var(--topbar-h);
+      min-height: var(--topbar-h);
+      padding: 0 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      position: relative; z-index: 1;
+    }
+
+    #page-title {
+      font-family: var(--display);
+      font-size: 26px;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .topbar-right {
+      display: flex; align-items: center; gap: 20px;
+    }
+
+    .topbar-chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 3px 9px;
+      letter-spacing: 0.02em;
+    }
+
+    #content {
+      flex: 1; overflow-y: auto; padding: 30px 32px;
+    }
+
+    /* Page enter animation */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .page-enter {
+      animation: fadeUp 0.28s ease-out both;
+    }
+
+    /* ── Cards ──────────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 22px;
+      margin-bottom: 14px;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: var(--border-2); }
+
+    .card-label {
+      font-family: var(--display);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* ── Stat cards ─────────────────────────────────────────────────────────── */
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 22px 24px 20px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .stat-card:hover {
+      border-color: var(--border-2);
+      background: var(--surface-2);
+    }
+
+    .stat-num {
+      font-family: var(--display);
+      font-size: 56px;
+      line-height: 0.9;
+      letter-spacing: 0.02em;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+    .stat-num.amber { color: var(--amber); }
+    .stat-num.green { color: var(--green); }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* Grids */
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+    /* ── Buttons ────────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 18px;
+      border-radius: 4px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--amber);
+      color: #0a0800;
+      border-color: var(--amber);
+      font-weight: 600;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--amber-soft);
+      border-color: var(--amber-soft);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-2);
+      border-color: var(--border-2);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      color: var(--text);
+      border-color: var(--muted);
+      background: var(--surface-2);
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--red);
+      border-color: rgba(245, 85, 85, 0.3);
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(245, 85, 85, 0.08);
+      border-color: var(--red);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border-color: transparent;
+      padding: 8px 10px;
+    }
+    .btn-ghost:hover:not(:disabled) { color: var(--text); }
+
+    .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+    /* ── Badges ─────────────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px;
+      border-radius: 2px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .badge-ok   { background: rgba(61, 220, 151, 0.1);  color: var(--green); }
+    .badge-off  { background: rgba(90, 87, 84, 0.2);    color: var(--muted); }
+    .badge-warn { background: rgba(232, 160, 32, 0.12); color: var(--amber); }
+
+    /* ── Editor ─────────────────────────────────────────────────────────────── */
+    .editor {
+      width: 100%; min-height: 320px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 16px 18px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px; line-height: 1.75;
+      resize: vertical; outline: none;
+      transition: border-color 0.2s;
+      caret-color: var(--amber);
+    }
+    .editor:focus { border-color: var(--amber); }
+
+    /* ── Select / Input ─────────────────────────────────────────────────────── */
+    .input, select.input {
+      padding: 8px 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+      appearance: none;
+    }
+    .input:focus, select.input:focus { border-color: var(--amber); }
+
+    /* ── Save bar ────────────────────────────────────────────────────────────── */
+    .save-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .save-status { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+    .save-status.ok  { color: var(--green); }
+    .save-status.err { color: var(--red); }
+
+    /* ── Toggle ─────────────────────────────────────────────────────────────── */
+    .toggle { position: relative; display: inline-block; width: 38px; height: 22px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: var(--surface-3);
+      border: 1px solid var(--border-2);
+      border-radius: 100px;
+      transition: 0.18s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px; height: 16px;
+      left: 2px; bottom: 2px;
+      background: var(--muted);
+      border-radius: 50%;
+      transition: 0.18s;
+    }
+    .toggle input:checked + .toggle-slider {
+      background: var(--amber-dim);
+      border-color: var(--amber-soft);
+    }
+    .toggle input:checked + .toggle-slider::before {
+      transform: translateX(16px);
+      background: var(--amber);
+    }
+
+    /* ── Table ──────────────────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+    th {
+      text-align: left;
+      padding: 7px 14px;
+      font-family: var(--display);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+      color: var(--text-2);
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface-2); }
+
+    .mono { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+
+    /* ── Code block ─────────────────────────────────────────────────────────── */
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 16px 18px;
+      font-family: var(--mono);
+      font-size: 12px; line-height: 1.75;
+      overflow-x: auto; white-space: pre;
+      color: #c9a96e;
+      max-height: 420px; overflow-y: auto;
+    }
+
+    /* ── Tabs ───────────────────────────────────────────────────────────────── */
+    .tabs {
+      display: flex; gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 22px;
+    }
+    .tab {
+      padding: 9px 20px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      margin-bottom: -1px;
+      font-weight: 400;
+      letter-spacing: 0.01em;
+    }
+    .tab:hover { color: var(--text-2); }
+    .tab.active { color: var(--amber); border-bottom-color: var(--amber); font-weight: 500; }
+
+    /* ── Log lines ──────────────────────────────────────────────────────────── */
+    .log-line {
+      font-family: var(--mono); font-size: 12px; line-height: 1.85;
+      padding: 0 2px;
+    }
+    .log-line.info    { color: #6dcff6; }
+    .log-line.ok      { color: var(--green); }
+    .log-line.warn    { color: var(--amber); }
+    .log-line.err     { color: var(--red); }
+    .log-line.agent   { color: #d08aff; }
+    .log-line.tool    { color: #f0c060; }
+    .log-line.default { color: var(--muted); }
+
+    /* ── Plugin cards ───────────────────────────────────────────────────────── */
+    .plugin-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 18px 20px;
+      transition: border-color 0.2s;
+    }
+    .plugin-card:hover { border-color: var(--border-2); }
+
+    .plugin-card-head {
+      display: flex; align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .plugin-name {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .plugin-desc { font-size: 12px; color: var(--muted); line-height: 1.55; margin-top: 3px; }
+    .plugin-meta {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 12px;
+      font-size: 11px; color: var(--muted);
+    }
+    .plugin-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: 14px; align-items: center; }
+
+    /* ── Quick links ────────────────────────────────────────────────────────── */
+    .quick-link {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-2);
+      transition: color 0.15s;
+    }
+    .quick-link:last-child { border-bottom: none; }
+    .quick-link:hover { color: var(--text); }
+    .quick-link-arrow { color: var(--muted); font-size: 16px; }
+
+    /* ── Onboarding wizard ───────────────────────────────────────────────────── */
+    #wizard-overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex; align-items: flex-start; justify-content: center;
+      z-index: 300;
+      overflow-y: auto;
+      padding: 52px 20px 60px;
+    }
+    #wizard-overlay.hidden { display: none; }
+
+    .wizard-card {
+      width: 100%; max-width: 540px;
+      animation: fadeUp 0.4s ease-out;
+    }
+
+    /* Step indicator */
+    .wizard-steps {
+      display: flex; align-items: center;
+      margin-bottom: 44px;
+    }
+    .wizard-step-node { display: flex; align-items: center; flex: 1; }
+    .wizard-step-node:last-child { flex: 0; }
+    .wizard-step-dot {
+      width: 30px; height: 30px; border-radius: 50%;
+      border: 1.5px solid var(--border-2);
+      background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 11px; font-weight: 500;
+      color: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+    .wizard-step-dot.active  { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
+    .wizard-step-dot.done    { background: var(--amber); border-color: var(--amber); color: #0a0800; }
+    .wizard-step-line { flex: 1; height: 1px; background: var(--border); margin: 0 8px; }
+    .wizard-step-line.done   { background: var(--amber-soft); }
+
+    /* Panel */
+    .wizard-panel { display: none; }
+    .wizard-panel.active { display: block; }
+
+    .wizard-heading {
+      font-family: var(--display);
+      font-size: 32px;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+    .wizard-sub {
+      font-size: 13px; color: var(--muted);
+      margin-bottom: 30px; line-height: 1.65;
+    }
+
+    /* Field */
+    .wizard-field { margin-bottom: 18px; }
+    .wizard-label {
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 7px;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .wizard-req { color: var(--amber); line-height: 1; }
+    .wizard-input {
+      width: 100%; padding: 11px 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-2);
+      border-radius: 4px;
+      color: var(--text); font-family: var(--mono); font-size: 13px;
+      outline: none; transition: border-color 0.2s;
+    }
+    .wizard-input:focus { border-color: var(--amber); }
+    .wizard-hint { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+
+    /* Integration accordion */
+    .wizard-service {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .wizard-service-head {
+      padding: 13px 18px;
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; user-select: none;
+      transition: background 0.15s;
+    }
+    .wizard-service-head:hover { background: var(--surface-2); }
+    .wizard-service-name { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--text); }
+    .wizard-service-tags { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .wizard-service-chevron { color: var(--muted); font-size: 14px; transition: transform 0.2s; }
+    .wizard-service.open .wizard-service-chevron { transform: rotate(90deg); }
+    .wizard-service-body {
+      display: none;
+      padding: 0 18px 18px;
+      border-top: 1px solid var(--border);
+    }
+    .wizard-service.open .wizard-service-body { display: block; padding-top: 16px; }
+
+    /* Nav bar */
+    .wizard-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 28px; padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Welcome screen */
+    .wizard-logo {
+      font-family: var(--display); font-size: 68px;
+      letter-spacing: 0.04em; color: var(--text);
+      line-height: 1; margin-bottom: 14px;
+    }
+    .wizard-tagline {
+      font-size: 14px; color: var(--muted);
+      margin-bottom: 52px; line-height: 1.7; max-width: 340px;
+    }
+
+    /* Done screen */
+    .wizard-done-list { list-style: none; margin-bottom: 24px; }
+    .wizard-done-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 0; border-bottom: 1px solid var(--border);
+      font-size: 13px; color: var(--text-2);
+    }
+    .wizard-done-item:last-child { border-bottom: none; }
+    .w-check { color: var(--green); }
+    .w-skip  { color: var(--muted); }
+
+    .wizard-restart {
+      background: var(--amber-dim);
+      border: 1px solid rgba(232, 160, 32, 0.2);
+      border-radius: 4px;
+      padding: 12px 16px;
+      font-size: 12px; color: var(--amber);
+      font-family: var(--mono);
+      margin-bottom: 24px;
+    }
+
+    .wizard-err { font-size: 12px; color: var(--red); margin-top: 10px; }
+    .wizard-err.hidden { display: none; }
+
+    /* ── Skill cards ────────────────────────────────────────────────────────── */
+    .skill-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .skill-card:hover { border-color: var(--border-2); }
+    .skill-card.skill-active { border-color: var(--amber-soft); }
+
+    .skill-head {
+      display: flex; align-items: center;
+      padding: 16px 20px;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .skill-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      background: var(--border-2);
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    .skill-active .skill-dot {
+      background: var(--amber);
+      box-shadow: 0 0 0 3px var(--amber-dim);
+    }
+    .skill-info { flex: 1; min-width: 0; }
+    .skill-name {
+      font-family: var(--mono); font-size: 14px; font-weight: 500;
+      color: var(--text); margin-bottom: 2px;
+    }
+    .skill-desc { font-size: 12px; color: var(--muted); }
+    .skill-chevron { color: var(--muted); font-size: 16px; transition: transform 0.2s; flex-shrink: 0; }
+    .skill-card.skill-open .skill-chevron { transform: rotate(90deg); }
+
+    .skill-body {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 20px;
+    }
+    .skill-card.skill-open .skill-body { display: block; }
+
+    .skill-field { margin-bottom: 16px; }
+    .skill-field-label {
+      font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 7px;
+    }
+    .skill-input {
+      width: 100%; padding: 8px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text); font-family: var(--sans); font-size: 13px;
+      outline: none; transition: border-color 0.2s;
+    }
+    .skill-input:focus { border-color: var(--amber); }
+    .skill-prompt {
+      width: 100%; min-height: 140px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 4px; padding: 12px 14px;
+      color: var(--text); font-family: var(--mono); font-size: 12.5px;
+      line-height: 1.7; resize: vertical; outline: none;
+      transition: border-color 0.2s; caret-color: var(--amber);
+    }
+    .skill-prompt:focus { border-color: var(--amber); }
+
+    .skill-actions {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+    }
+    .skill-save-status { font-size: 12px; font-family: var(--mono); color: var(--muted); margin-left: auto; }
+    .skill-save-status.ok  { color: var(--green); }
+    .skill-save-status.err { color: var(--red); }
+
+    /* New context modal */
+    .skill-modal-bg {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(7,7,8,0.82);
+      display: flex; align-items: center; justify-content: center;
+      animation: fadeIn 0.15s ease-out;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .skill-modal {
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: 8px;
+      padding: 28px;
+      width: 480px; max-width: calc(100vw - 40px);
+      animation: fadeUp 0.2s ease-out;
+    }
+    .skill-modal-title {
+      font-family: var(--display); font-size: 22px;
+      letter-spacing: 0.06em; color: var(--text);
+      margin-bottom: 22px;
+    }
+
+    /* ── Divider ────────────────────────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+    /* ── Empty state ────────────────────────────────────────────────────────── */
+    .empty-state {
+      padding: 60px 24px;
+      text-align: center;
+    }
+    .empty-state-title {
+      font-family: var(--display);
+      font-size: 22px;
+      letter-spacing: 0.08em;
+      color: var(--border-2);
+      margin-bottom: 8px;
+    }
+    .empty-state-sub { font-size: 12px; color: var(--muted); }
+
+    /* ── Misc ───────────────────────────────────────────────────────────────── */
+    .hidden { display: none !important; }
+    .uptime { font-variant-numeric: tabular-nums; }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  </style>
+</head>
+<body>
+
+<!-- ── Onboarding wizard ─────────────────────────────────────────────────── -->
+<div id="wizard-overlay" class="hidden">
+  <div class="wizard-card">
+
+    <!-- Step indicator (hidden on welcome/done) -->
+    <div class="wizard-steps" id="wizard-step-bar">
+      <div class="wizard-step-node">
+        <div class="wizard-step-dot" id="wdot-1">1</div>
+        <div class="wizard-step-line" id="wline-1"></div>
+      </div>
+      <div class="wizard-step-node">
+        <div class="wizard-step-dot" id="wdot-2">2</div>
+        <div class="wizard-step-line" id="wline-2"></div>
+      </div>
+      <div class="wizard-step-node">
+        <div class="wizard-step-dot" id="wdot-3">3</div>
+      </div>
+    </div>
+
+    <!-- Step 0: Welcome -->
+    <div class="wizard-panel active" id="wpanel-0">
+      <div class="wizard-logo">ATREX AI</div>
+      <div class="wizard-tagline">
+        Welcome to your personal AI assistant.<br>
+        Let's get everything set up in a few quick steps.
+      </div>
+      <button class="btn btn-primary" style="padding:11px 28px" onclick="wizardGo(1)">
+        Get started →
+      </button>
+    </div>
+
+    <!-- Step 1: Core credentials -->
+    <div class="wizard-panel" id="wpanel-1">
+      <div class="wizard-heading">Core Credentials</div>
+      <div class="wizard-sub">These are required for the agent to start.</div>
+
+      <div class="wizard-field">
+        <div class="wizard-label">Telegram Bot Token <span class="wizard-req">*</span></div>
+        <input id="w-tg-token" class="wizard-input" type="password"
+               placeholder="1234567890:ABCdef…" autocomplete="off" />
+        <div class="wizard-hint">
+          Create a bot via <strong>@BotFather</strong> on Telegram → /newbot → copy the token.
+        </div>
+      </div>
+
+      <div class="wizard-field">
+        <div class="wizard-label">Anthropic API Key <span class="wizard-req">*</span></div>
+        <input id="w-anth-key" class="wizard-input" type="password"
+               placeholder="sk-ant-…" autocomplete="off" />
+        <div class="wizard-hint">
+          Get yours at <strong>console.anthropic.com</strong> → API Keys.
+        </div>
+      </div>
+
+      <div class="wizard-field">
+        <div class="wizard-label">Your Telegram User ID</div>
+        <input id="w-user-ids" class="wizard-input" type="text"
+               placeholder="123456789" autocomplete="off" />
+        <div class="wizard-hint">
+          Optional but recommended — restricts the bot to your account only.
+          Get your ID from <strong>@userinfobot</strong> on Telegram.
+        </div>
+      </div>
+
+      <div class="wizard-field">
+        <div class="wizard-label">Admin Panel Password</div>
+        <input id="w-admin-token" class="wizard-input" type="password"
+               placeholder="leave blank for no password" autocomplete="new-password" />
+        <div class="wizard-hint">
+          Optional. If set, this dashboard will require a password on each browser.
+        </div>
+      </div>
+
+      <div class="wizard-err hidden" id="w-core-err"></div>
+      <div class="wizard-nav">
+        <button class="btn btn-ghost" onclick="wizardGo(0)">← Back</button>
+        <button class="btn btn-primary" onclick="wizardSaveCore()">Save & Continue →</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Integrations -->
+    <div class="wizard-panel" id="wpanel-2">
+      <div class="wizard-heading">Connect Services</div>
+      <div class="wizard-sub">All optional — you can configure these later from the Integrations page.</div>
+
+      <!-- Google -->
+      <div class="wizard-service" id="wsvc-google">
+        <div class="wizard-service-head" onclick="toggleService('google')">
+          <div>
+            <div class="wizard-service-name">Google</div>
+            <div class="wizard-service-tags">Gmail · Calendar · Drive</div>
+          </div>
+          <span class="wizard-service-chevron">›</span>
+        </div>
+        <div class="wizard-service-body">
+          <div class="wizard-field" style="margin-top:0">
+            <div class="wizard-label">Client ID</div>
+            <input id="w-google-id" class="wizard-input" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off" />
+          </div>
+          <div class="wizard-field">
+            <div class="wizard-label">Client Secret</div>
+            <input id="w-google-secret" class="wizard-input" type="password" placeholder="GOCSPX-…" autocomplete="off" />
+          </div>
+          <div class="wizard-hint">
+            <strong>console.cloud.google.com</strong> → APIs &amp; Services → Credentials → OAuth 2.0 Client ID.<br>
+            Add redirect URI: <code style="color:var(--amber)">http://localhost:3000/auth/google/callback</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notion -->
+      <div class="wizard-service" id="wsvc-notion">
+        <div class="wizard-service-head" onclick="toggleService('notion')">
+          <div>
+            <div class="wizard-service-name">Notion</div>
+            <div class="wizard-service-tags">Pages · Databases</div>
+          </div>
+          <span class="wizard-service-chevron">›</span>
+        </div>
+        <div class="wizard-service-body">
+          <div class="wizard-field" style="margin-top:0">
+            <div class="wizard-label">API Key</div>
+            <input id="w-notion-key" class="wizard-input" type="password" placeholder="secret_…" autocomplete="off" />
+          </div>
+          <div class="wizard-hint">
+            <strong>notion.so/my-integrations</strong> → New integration → copy the Internal Integration Token.
+          </div>
+        </div>
+      </div>
+
+      <!-- Todoist -->
+      <div class="wizard-service" id="wsvc-todoist">
+        <div class="wizard-service-head" onclick="toggleService('todoist')">
+          <div>
+            <div class="wizard-service-name">Todoist</div>
+            <div class="wizard-service-tags">Tasks · Projects</div>
+          </div>
+          <span class="wizard-service-chevron">›</span>
+        </div>
+        <div class="wizard-service-body">
+          <div class="wizard-field" style="margin-top:0">
+            <div class="wizard-label">API Key</div>
+            <input id="w-todoist-key" class="wizard-input" type="password" placeholder="…" autocomplete="off" />
+          </div>
+          <div class="wizard-hint">
+            <strong>todoist.com/app/settings/integrations</strong> → Developer → API token.
+          </div>
+        </div>
+      </div>
+
+      <!-- Brave Search -->
+      <div class="wizard-service" id="wsvc-brave">
+        <div class="wizard-service-head" onclick="toggleService('brave')">
+          <div>
+            <div class="wizard-service-name">Brave Search</div>
+            <div class="wizard-service-tags">Web Search</div>
+          </div>
+          <span class="wizard-service-chevron">›</span>
+        </div>
+        <div class="wizard-service-body">
+          <div class="wizard-field" style="margin-top:0">
+            <div class="wizard-label">API Key</div>
+            <input id="w-brave-key" class="wizard-input" type="password" placeholder="BSA…" autocomplete="off" />
+          </div>
+          <div class="wizard-hint">
+            <strong>api.search.brave.com/app/keys</strong> → Create subscription → copy key.
+          </div>
+        </div>
+      </div>
+
+      <!-- OpenAI (voice) -->
+      <div class="wizard-service" id="wsvc-openai">
+        <div class="wizard-service-head" onclick="toggleService('openai')">
+          <div>
+            <div class="wizard-service-name">OpenAI</div>
+            <div class="wizard-service-tags">Voice transcription (Whisper)</div>
+          </div>
+          <span class="wizard-service-chevron">›</span>
+        </div>
+        <div class="wizard-service-body">
+          <div class="wizard-field" style="margin-top:0">
+            <div class="wizard-label">API Key</div>
+            <input id="w-openai-key" class="wizard-input" type="password" placeholder="sk-…" autocomplete="off" />
+          </div>
+          <div class="wizard-hint">
+            <strong>platform.openai.com/api-keys</strong>. Used only for Whisper voice transcription (~$0.006/min).
+          </div>
+        </div>
+      </div>
+
+      <div class="wizard-err hidden" id="w-integ-err"></div>
+      <div class="wizard-nav">
+        <button class="btn btn-ghost" onclick="wizardGo(1)">← Back</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="wizardFinish(true)">Skip</button>
+          <button class="btn btn-primary" onclick="wizardFinish(false)">Finish Setup →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Done -->
+    <div class="wizard-panel" id="wpanel-3">
+      <div class="wizard-heading">All Set</div>
+      <div class="wizard-sub">Here's what was configured during setup.</div>
+      <ul class="wizard-done-list" id="wizard-done-list"></ul>
+      <div class="wizard-restart" id="wizard-restart-note" style="display:none">
+        Restart the agent for your core credentials to take effect:<br>
+        <code style="color:var(--text)">npm start</code>
+      </div>
+      <div class="wizard-nav" style="border:none;padding:0;margin:0">
+        <span></span>
+        <button class="btn btn-primary" onclick="wizardOpenDashboard()">Open Dashboard →</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Auth overlay ──────────────────────────────────────────────────────── -->
+<div id="auth-overlay" class="hidden">
+  <div class="auth-card">
+    <div class="auth-logo">ATREX AI</div>
+    <div class="auth-sub">Administration Panel</div>
+    <div class="auth-label">Access Token</div>
+    <input id="token-input" class="auth-input" type="password"
+           placeholder="Enter your admin token…" autocomplete="off" />
+    <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="submitToken()">
+      Unlock
+    </button>
+    <div id="auth-error" class="hidden">Incorrect token — try again.</div>
+  </div>
+</div>
+
+<!-- ── App shell ─────────────────────────────────────────────────────────── -->
+<div id="app" class="hidden">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-wordmark">ATREX AI</div>
+      <div class="brand-status">
+        <div class="brand-dot" id="brand-dot"></div>
+        <span class="brand-status-text" id="status-text">Connecting…</span>
+      </div>
+    </div>
+
+    <nav>
+      <div class="nav-group">
+        <div class="nav-section">Overview</div>
+        <div class="nav-item active" data-page="dashboard">Dashboard</div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-section">Identity</div>
+        <div class="nav-item" data-page="skills">Skills</div>
+        <div class="nav-item" data-page="soul">Soul</div>
+        <div class="nav-item" data-page="user">User Profile</div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-section">Data</div>
+        <div class="nav-item" data-page="memory">Memory</div>
+        <div class="nav-item" data-page="logs">Logs</div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-section">System</div>
+        <div class="nav-item" data-page="integrations">Integrations</div>
+        <div class="nav-item" data-page="heartbeat">Heartbeat</div>
+        <div class="nav-item" data-page="secrets">Secrets</div>
+        <div class="nav-item" data-page="settings">Settings</div>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <div id="main">
+    <header id="topbar">
+      <span id="page-title">Dashboard</span>
+      <div class="topbar-right">
+        <span class="topbar-chip" id="model-badge"></span>
+        <span class="topbar-chip uptime" id="uptime-badge"></span>
+      </div>
+    </header>
+    <div id="content"></div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let token = localStorage.getItem('admin_token') || '';
+let currentPage = 'dashboard';
+let uptimeInterval = null;
+let uptimeOffset = 0;
+
+// ── API helper ─────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const opts = { method, headers };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (res.status === 401) { showAuth(); return null; }
+  return res.json();
+}
+
+const get  = (path)       => api('GET',    path);
+const put  = (path, body) => api('PUT',    path, body);
+const post = (path, body) => api('POST',   path, body ?? {});
+const del  = (path)       => api('DELETE', path);
+
+// ── Auth / Setup ───────────────────────────────────────────────────────────
+async function init() {
+  // Check setup first — /setup/status is always accessible (no auth needed)
+  const setup = await fetch('/setup/status').then(r => r.json()).catch(() => null);
+  if (setup && setup.needsSetup) {
+    showWizard();
+    return;
+  }
+
+  const data = await get('/api/auth-required');
+  if (!data) return;
+  if (data.required && !token) {
+    showAuth();
+  } else {
+    showApp();
+  }
+}
+
+function showAuth() {
+  document.getElementById('auth-overlay').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('wizard-overlay').classList.add('hidden');
+}
+
+function showApp() {
+  document.getElementById('auth-overlay').classList.add('hidden');
+  document.getElementById('wizard-overlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  navigate(location.hash.slice(1) || 'dashboard');
+  startUptimeTick();
+}
+
+// ── Onboarding wizard ─────────────────────────────────────────────────────
+let _wizardCoreWritten = false;
+let _wizardDoneItems   = [];
+
+function showWizard() {
+  document.getElementById('auth-overlay').classList.add('hidden');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('wizard-overlay').classList.remove('hidden');
+  wizardGo(0);
+}
+
+function wizardGo(step) {
+  // Hide all panels
+  document.querySelectorAll('.wizard-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`wpanel-${step}`).classList.add('active');
+
+  // Update step dots (steps 1-3 map to dots 1-3)
+  const bar = document.getElementById('wizard-step-bar');
+  bar.style.display = (step === 0 || step === 3) ? 'none' : 'flex';
+
+  for (let i = 1; i <= 3; i++) {
+    const dot  = document.getElementById(`wdot-${i}`);
+    const line = document.getElementById(`wline-${i}`);
+    dot.classList.remove('active', 'done');
+    if (i < step)  dot.classList.add('done');
+    if (i === step) dot.classList.add('active');
+    if (line) { line.classList.remove('done'); if (i < step) line.classList.add('done'); }
+  }
+}
+
+function toggleService(name) {
+  document.getElementById(`wsvc-${name}`).classList.toggle('open');
+}
+
+async function wizardSaveCore() {
+  const tg    = document.getElementById('w-tg-token').value.trim();
+  const anth  = document.getElementById('w-anth-key').value.trim();
+  const ids   = document.getElementById('w-user-ids').value.trim();
+  const adm   = document.getElementById('w-admin-token').value.trim();
+  const errEl = document.getElementById('w-core-err');
+
+  if (!tg || !anth) {
+    errEl.textContent = 'Telegram Bot Token and Anthropic API Key are required.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  errEl.classList.add('hidden');
+
+  const res = await fetch('/setup/core', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ telegramToken: tg, anthropicKey: anth, allowedUserIds: ids, adminToken: adm }),
+  }).then(r => r.json()).catch(() => null);
+
+  if (!res || !res.ok) {
+    errEl.textContent = 'Failed to save credentials. Check file permissions.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  _wizardCoreWritten = true;
+  wizardGo(2);
+}
+
+async function wizardFinish(skip) {
+  const errEl = document.getElementById('w-integ-err');
+  errEl.classList.add('hidden');
+
+  if (!skip) {
+    const secrets = [
+      { key: 'GOOGLE_CLIENT_ID',     val: document.getElementById('w-google-id').value.trim() },
+      { key: 'GOOGLE_CLIENT_SECRET', val: document.getElementById('w-google-secret').value.trim() },
+      { key: 'NOTION_API_KEY',       val: document.getElementById('w-notion-key').value.trim() },
+      { key: 'TODOIST_API_KEY',      val: document.getElementById('w-todoist-key').value.trim() },
+      { key: 'BRAVE_SEARCH_API_KEY', val: document.getElementById('w-brave-key').value.trim() },
+      { key: 'OPENAI_API_KEY',       val: document.getElementById('w-openai-key').value.trim() },
+    ].filter(s => s.val);
+
+    for (const s of secrets) {
+      const res = await fetch('/setup/secret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: s.key, value: s.val }),
+      }).then(r => r.json()).catch(() => null);
+      if (!res || !res.ok) {
+        errEl.textContent = `Failed to save ${s.key}.`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+    }
+
+    _wizardDoneItems = secrets.map(s => s.key);
+  }
+
+  // Build done list
+  const allItems = [
+    { label: 'Telegram Bot Token',    done: _wizardCoreWritten },
+    { label: 'Anthropic API Key',     done: _wizardCoreWritten },
+    { label: 'Google OAuth',          done: _wizardDoneItems.includes('GOOGLE_CLIENT_ID') },
+    { label: 'Notion',                done: _wizardDoneItems.includes('NOTION_API_KEY') },
+    { label: 'Todoist',               done: _wizardDoneItems.includes('TODOIST_API_KEY') },
+    { label: 'Brave Search',          done: _wizardDoneItems.includes('BRAVE_SEARCH_API_KEY') },
+    { label: 'OpenAI Voice',          done: _wizardDoneItems.includes('OPENAI_API_KEY') },
+  ];
+
+  document.getElementById('wizard-done-list').innerHTML = allItems.map(item => `
+    <li class="wizard-done-item">
+      <span class="${item.done ? 'w-check' : 'w-skip'}">${item.done ? '✓' : '○'}</span>
+      <span style="${item.done ? '' : 'color:var(--muted)'}">${escHtml(item.label)}</span>
+      ${item.done ? '' : '<span style="font-size:11px;color:var(--muted);margin-left:auto">skipped</span>'}
+    </li>
+  `).join('');
+
+  if (_wizardCoreWritten) {
+    document.getElementById('wizard-restart-note').style.display = 'block';
+  }
+
+  wizardGo(3);
+}
+
+async function wizardOpenDashboard() {
+  document.getElementById('wizard-overlay').classList.add('hidden');
+  // Re-run init — if core was written but not yet active (requires restart),
+  // the status endpoint still reports needsSetup:true, so go straight to app.
+  const data = await get('/api/auth-required');
+  if (data && data.required && !token) {
+    showAuth();
+  } else {
+    showApp();
+  }
+}
+
+async function submitToken() {
+  const input = document.getElementById('token-input').value.trim();
+  token = input;
+  const data = await get('/api/status');
+  if (data) {
+    localStorage.setItem('admin_token', token);
+    document.getElementById('auth-error').classList.add('hidden');
+    showApp();
+  } else {
+    document.getElementById('auth-error').classList.remove('hidden');
+  }
+}
+
+document.getElementById('token-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitToken();
+});
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+const PAGE_TITLES = {
+  dashboard:    'Dashboard',
+  skills:       'Skills',
+  soul:         'Soul',
+  user:         'User Profile',
+  memory:       'Memory',
+  integrations: 'Integrations',
+  heartbeat:    'Heartbeat',
+  secrets:      'Secrets',
+  settings:     'Settings',
+  logs:         'Logs',
+};
+
+function navigate(page) {
+  currentPage = page || 'dashboard';
+  location.hash = currentPage;
+  document.getElementById('page-title').textContent = PAGE_TITLES[currentPage] || currentPage;
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === currentPage);
+  });
+  render(currentPage);
+}
+
+document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+  el.addEventListener('click', () => navigate(el.dataset.page));
+});
+
+// ── Uptime ────────────────────────────────────────────────────────────────
+function startUptimeTick() {
+  if (uptimeInterval) clearInterval(uptimeInterval);
+  uptimeInterval = setInterval(() => {
+    if (uptimeOffset === 0) return;
+    const ms = uptimeOffset + (Date.now() - uptimeStart);
+    const el = document.getElementById('uptime-badge');
+    if (el) el.textContent = 'up ' + formatUptime(ms);
+  }, 1000);
+}
+
+let uptimeStart = Date.now();
+
+function formatUptime(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+// ── Router ─────────────────────────────────────────────────────────────────
+async function render(page) {
+  const el = document.getElementById('content');
+  el.innerHTML = '';
+  try {
+    switch (page) {
+      case 'dashboard': await renderDashboard(); break;
+      case 'skills':    await renderSkills();     break;
+      case 'soul':      await renderEditor('/api/soul',  'soul.md',  'Personality & Behavior Rules'); break;
+      case 'user':      await renderEditor('/api/user',  'user.md',  'User Profile — auto-updated by agent'); break;
+      case 'memory':    await renderMemory();    break;
+      case 'integrations': await renderIntegrations(); break;
+      case 'heartbeat': await renderEditor('/api/heartbeat', 'heartbeat.md', 'Timed reminders and recurring tasks — edited by the agent, viewable here'); break;
+      case 'secrets':   await renderSecrets();   break;
+      case 'settings':  await renderSettings();  break;
+      case 'logs':      await renderLogs();      break;
+      default: el.innerHTML = '<div class="empty-state"><div class="empty-state-title">NOT FOUND</div></div>';
+    }
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);padding:20px;font-family:var(--mono);font-size:12px">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+async function renderDashboard() {
+  const s = await get('/api/status');
+  if (!s) return;
+
+  uptimeOffset = s.uptimeMs;
+  uptimeStart  = Date.now();
+
+  document.getElementById('brand-dot').classList.remove('offline');
+  document.getElementById('status-text').textContent = 'Online';
+  document.getElementById('model-badge').textContent = s.model;
+
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="page-enter">
+      <div class="grid-4" style="margin-bottom:14px">
+        <div class="stat-card">
+          <div class="stat-num green">ON</div>
+          <div class="stat-label">Status</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num amber">${s.plugins.enabled}</div>
+          <div class="stat-label">Active Integrations</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num">${s.plugins.total}</div>
+          <div class="stat-label">Total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num">${s.scheduleCount}</div>
+          <div class="stat-label">Schedules</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card" style="margin:0">
+          <div class="card-label">Quick Navigation</div>
+          <div class="quick-link" onclick="navigate('soul')">
+            <span>Edit Soul</span><span class="quick-link-arrow">›</span>
+          </div>
+          <div class="quick-link" onclick="navigate('user')">
+            <span>Edit User Profile</span><span class="quick-link-arrow">›</span>
+          </div>
+          <div class="quick-link" onclick="navigate('memory')">
+            <span>View Memory</span><span class="quick-link-arrow">›</span>
+          </div>
+          <div class="quick-link" onclick="navigate('integrations')">
+            <span>Manage Integrations</span><span class="quick-link-arrow">›</span>
+          </div>
+          <div class="quick-link" onclick="navigate('logs')">
+            <span>View Logs</span><span class="quick-link-arrow">›</span>
+          </div>
+        </div>
+
+        <div class="card" style="margin:0">
+          <div class="card-label">System</div>
+          <div style="margin-bottom:18px">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;letter-spacing:0.06em;text-transform:uppercase">Model</div>
+            <div style="font-family:var(--mono);font-size:13px;color:var(--amber)">${s.model}</div>
+          </div>
+          <div style="margin-bottom:18px">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;letter-spacing:0.06em;text-transform:uppercase">Uptime</div>
+            <div style="font-family:var(--mono);font-size:13px;color:var(--text-2)" id="dash-uptime">${formatUptime(s.uptimeMs)}</div>
+          </div>
+          <div class="divider"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" onclick="navigate('settings')">Settings</button>
+            <button class="btn btn-secondary btn-sm" onclick="navigate('secrets')">Secrets</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  setInterval(() => {
+    const el = document.getElementById('dash-uptime');
+    if (el) el.textContent = formatUptime(uptimeOffset + (Date.now() - uptimeStart));
+  }, 1000);
+}
+
+// ── Integrations (merged Plugins + connection status) ──────────────────────
+async function renderIntegrations() {
+  const integrations = await get('/api/integrations');
+  if (!integrations) return;
+
+  const el = document.getElementById('content');
+
+  if (!integrations.length) {
+    el.innerHTML = `<div class="page-enter empty-state">
+      <div class="empty-state-title">NO INTEGRATIONS</div>
+      <div class="empty-state-sub">Ask the agent to create a plugin via Telegram.</div>
+    </div>`;
+    return;
+  }
+
+  const cards = integrations.map((p, i) => {
+    const meta     = p.integration;
+    const services = meta?.services?.join(' · ') || '';
+
+    let statusBadge = '';
+    let connectBtn  = '';
+
+    if (meta?.type === 'oauth') {
+      if (p.status === 'connected') {
+        statusBadge = `<span class="badge badge-ok">Connected</span>`;
+        connectBtn  = `<button class="btn btn-danger btn-sm" onclick="oauthDisconnect('${meta.authService}', '${p.name}')">Disconnect</button>`;
+      } else {
+        statusBadge = `<span class="badge badge-off">Not connected</span>`;
+        connectBtn  = `<button class="btn btn-secondary btn-sm" onclick="showOAuthModal('${meta.authService}')">Connect</button>`;
+      }
+    } else if (meta?.type === 'apikey') {
+      if (p.status === 'configured') {
+        statusBadge = `<span class="badge badge-ok">Configured</span>`;
+      } else {
+        statusBadge = `<span class="badge badge-warn">Key missing</span>`;
+        connectBtn  = `<button class="btn btn-secondary btn-sm" onclick="showSecretHint('${escHtml(meta.secretKey || '')}')">Set key</button>`;
+      }
+    } else if (meta?.type === 'email') {
+      if (p.status === 'configured') {
+        statusBadge = `<span class="badge badge-ok">Configured</span>`;
+        connectBtn  = `<button class="btn btn-secondary btn-sm" onclick="showEmailModal()">Edit</button>
+                       <button class="btn btn-danger btn-sm" onclick="disconnectEmail()">Disconnect</button>`;
+      } else {
+        statusBadge = `<span class="badge badge-warn">Not configured</span>`;
+        connectBtn  = `<button class="btn btn-secondary btn-sm" onclick="showEmailModal()">Configure</button>`;
+      }
+    }
+
+    return `
+      <div class="plugin-card page-enter" id="integration-card-${p.name}" style="animation-delay:${i * 40}ms">
+        <div class="plugin-card-head">
+          <div style="min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+              <div class="plugin-name">${escHtml(meta?.displayName || p.name)}</div>
+              ${statusBadge}
+            </div>
+            ${services ? `<div class="plugin-desc">${escHtml(services)}</div>` : ''}
+            <div class="plugin-desc" style="margin-top:2px">${escHtml(p.description || '')}</div>
+          </div>
+          <div class="plugin-actions">
+            ${connectBtn}
+            <button class="btn btn-secondary btn-sm" onclick="viewPluginCode('${p.name}')">Code</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteIntegration('${p.name}')">Delete</button>
+            <label class="toggle" title="${p.enabled ? 'Disable' : 'Enable'}">
+              <input type="checkbox" ${p.enabled ? 'checked' : ''}
+                onchange="togglePlugin('${p.name}', this)" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="plugin-meta">
+          <span class="badge ${p.enabled ? 'badge-ok' : 'badge-off'}" id="plugin-badge-${p.name}">
+            ${p.enabled ? 'enabled' : 'disabled'}
+          </span>
+          <span>Added ${new Date(p.createdAt).toLocaleDateString()}</span>
+        </div>
+        <div id="plugin-code-${p.name}" class="hidden" style="margin-top:14px">
+          <div class="code-block" id="plugin-code-content-${p.name}"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px">${cards}</div>`;
+}
+
+async function showOAuthModal(service) {
+  // Fetch the auth URL from the server
+  const data = await get(`/auth/${service}/url`);
+  if (!data) return;
+  if (data.error) { alert(data.error); return; }
+
+  const url = data.url;
+  const modal = document.createElement('div');
+  modal.className = 'skill-modal-bg';
+  modal.id = 'oauth-modal';
+  modal.innerHTML = `
+    <div class="skill-modal" style="max-width:520px">
+      <div class="skill-modal-title">Connect Google</div>
+
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+        <strong style="color:var(--text-2)">Step 1</strong> — Open this URL in your browser and sign in with your Google account:
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:20px;align-items:stretch">
+        <div style="
+          flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+          background:var(--bg);border:1px solid var(--border);border-radius:4px;
+          padding:8px 12px;font-family:var(--mono);font-size:11px;color:var(--muted);
+          cursor:text;user-select:all;
+        " id="oauth-url-display" title="${escHtml(url)}">${escHtml(url)}</div>
+        <button class="btn btn-secondary btn-sm" onclick="copyOAuthUrl()" id="oauth-copy-btn" style="flex-shrink:0">Copy</button>
+        <a href="${escHtml(url)}" target="_blank" class="btn btn-secondary btn-sm" style="flex-shrink:0;text-decoration:none">Open ↗</a>
+      </div>
+
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+        <strong style="color:var(--text-2)">Step 2</strong> — After signing in, Google redirects to <code style="color:var(--amber)">localhost:3000/auth/google/callback</code>.<br>
+        The page may show an error — that's fine. Copy the <strong>full URL</strong> from your browser's address bar and paste it below:
+      </div>
+      <textarea id="oauth-paste-input"
+        class="skill-prompt"
+        style="min-height:72px;margin-bottom:14px"
+        placeholder="http://localhost:3000/auth/google/callback?code=4/0AQlEd8x…&scope=…"></textarea>
+
+      <div id="oauth-modal-err" style="font-size:12px;color:var(--red);margin-bottom:12px;display:none"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeOAuthModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitOAuthCode('${service}')">Complete Connection</button>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', e => { if (e.target === modal) closeOAuthModal(); });
+  document.body.appendChild(modal);
+
+  // Store URL for copy button
+  window._oauthUrl = url;
+}
+
+function copyOAuthUrl() {
+  navigator.clipboard.writeText(window._oauthUrl || '').then(() => {
+    const btn = document.getElementById('oauth-copy-btn');
+    if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy'; }, 2000); }
+  });
+}
+
+function closeOAuthModal() {
+  document.getElementById('oauth-modal')?.remove();
+}
+
+async function submitOAuthCode(service) {
+  const callbackUrl = document.getElementById('oauth-paste-input')?.value?.trim();
+  const errEl = document.getElementById('oauth-modal-err');
+
+  if (!callbackUrl) {
+    errEl.textContent = 'Please paste the redirect URL from your browser.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.querySelector('#oauth-modal .btn-primary');
+  if (btn) { btn.textContent = 'Connecting…'; btn.disabled = true; }
+  errEl.style.display = 'none';
+
+  const res = await post(`/auth/${service}/manual`, { callbackUrl });
+  if (res && res.ok) {
+    closeOAuthModal();
+    renderIntegrations();
+  } else {
+    errEl.textContent = res?.error || 'Connection failed. Check that you copied the full URL.';
+    errEl.style.display = 'block';
+    if (btn) { btn.textContent = 'Complete Connection'; btn.disabled = false; }
+  }
+}
+
+async function oauthDisconnect(service, pluginName) {
+  if (!confirm(`Disconnect ${service}? The ${pluginName} plugin will stop working.`)) return;
+  const res = await del(`/auth/${service}`);
+  if (res && res.ok) renderIntegrations();
+}
+
+function showSecretHint(secretKey) {
+  alert(`Tell the agent in Telegram:\n\n"Store secret ${secretKey}"\n\nOr go to Secrets and add it manually.`);
+}
+
+// ── Email config modal ────────────────────────────────────────────────────────
+async function showEmailModal() {
+  const cfg = await get('/api/email/config') || {};
+  const modal = document.createElement('div');
+  modal.className = 'skill-modal-bg';
+  modal.id = 'email-modal';
+  modal.innerHTML = `
+    <div class="skill-modal" style="max-width:480px">
+      <div class="skill-modal-title">Email Configuration</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.6">
+        For Gmail: enable IMAP in Gmail settings and use an
+        <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--amber)">App Password</a>.
+      </p>
+
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Email address</div>
+          <input id="em-address" class="wizard-input" type="email" placeholder="agent@example.com" value="${escHtml(cfg.address || '')}" />
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Password / App password</div>
+          <input id="em-password" class="wizard-input" type="password" placeholder="••••••••" autocomplete="off" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">IMAP host</div>
+            <input id="em-imap-host" class="wizard-input" type="text" placeholder="imap.gmail.com" value="${escHtml(cfg.imap_host || '')}" />
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Port</div>
+            <input id="em-imap-port" class="wizard-input" type="number" placeholder="993" value="${escHtml(cfg.imap_port || '993')}" />
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 80px;gap:8px">
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">SMTP host</div>
+            <input id="em-smtp-host" class="wizard-input" type="text" placeholder="smtp.gmail.com" value="${escHtml(cfg.smtp_host || '')}" />
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Port</div>
+            <input id="em-smtp-port" class="wizard-input" type="number" placeholder="587" value="${escHtml(cfg.smtp_port || '587')}" />
+          </div>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text-2)">
+          <input id="em-smtp-secure" type="checkbox" ${cfg.smtp_secure === 'true' ? 'checked' : ''} style="width:14px;height:14px" />
+          SMTP SSL/TLS (use for port 465; leave off for 587 STARTTLS)
+        </label>
+      </div>
+
+      <div id="em-test-result" style="font-size:12px;min-height:18px;margin-top:14px"></div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+        <button class="btn btn-secondary" onclick="document.getElementById('email-modal').remove()">Cancel</button>
+        <button class="btn btn-secondary" onclick="testEmailConnection()">Test Connection</button>
+        <button class="btn btn-primary" onclick="saveEmailConfig()">Save</button>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+function emailModalValues() {
+  return {
+    address:     document.getElementById('em-address')?.value?.trim(),
+    password:    document.getElementById('em-password')?.value,
+    imap_host:   document.getElementById('em-imap-host')?.value?.trim(),
+    imap_port:   document.getElementById('em-imap-port')?.value?.trim(),
+    smtp_host:   document.getElementById('em-smtp-host')?.value?.trim(),
+    smtp_port:   document.getElementById('em-smtp-port')?.value?.trim(),
+    smtp_secure: document.getElementById('em-smtp-secure')?.checked ? 'true' : 'false',
+  };
+}
+
+async function testEmailConnection() {
+  const v = emailModalValues();
+  const el = document.getElementById('em-test-result');
+  el.textContent = 'Testing…';
+  el.style.color = 'var(--muted)';
+  const res = await post('/api/email/test', v) || {};
+  const imapOk = res.imap === 'ok';
+  const smtpOk = res.smtp === 'ok';
+  el.innerHTML =
+    `IMAP: <span style="color:${imapOk ? 'var(--green)' : 'var(--red)'}">${imapOk ? '✓ OK' : escHtml(res.imap || 'failed')}</span>` +
+    ` &nbsp; SMTP: <span style="color:${smtpOk ? 'var(--green)' : 'var(--red)'}">${smtpOk ? '✓ OK' : escHtml(res.smtp || 'failed')}</span>`;
+}
+
+async function saveEmailConfig() {
+  const v = emailModalValues();
+  if (!v.address || !v.imap_host || !v.smtp_host) {
+    alert('Address, IMAP host, and SMTP host are required.'); return;
+  }
+  const res = await post('/api/email/config', v) || {};
+  if (res.ok) {
+    document.getElementById('email-modal')?.remove();
+    renderIntegrations();
+  } else {
+    alert(res.error || 'Save failed.');
+  }
+}
+
+async function disconnectEmail() {
+  if (!confirm('Remove email configuration?')) return;
+  const res = await del('/api/email/config') || {};
+  if (res.ok) renderIntegrations();
+  else alert(res.error || 'Failed.');
+}
+
+async function deleteIntegration(name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  const res = await del(`/api/plugins/${name}`);
+  if (res && res.ok) {
+    document.getElementById(`integration-card-${name}`)?.remove();
+    if (!document.querySelector('[id^="integration-card-"]')) renderIntegrations();
+  }
+}
+
+// ── Generic editor page ────────────────────────────────────────────────────
+async function renderEditor(apiPath, filename, subtitle) {
+  const data = await get(apiPath);
+  if (!data) return;
+
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="page-enter">
+      <div class="card" style="margin:0">
+        <div class="card-label">${filename}</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:16px">${subtitle}</div>
+        <textarea id="editor-ta" class="editor" spellcheck="false">${escHtml(data.content)}</textarea>
+        <div class="save-bar">
+          <span id="save-status" class="save-status"></span>
+          <button class="btn btn-primary" onclick="saveEditor('${apiPath}')">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function saveEditor(apiPath) {
+  const content = document.getElementById('editor-ta').value;
+  const status  = document.getElementById('save-status');
+  status.textContent = 'Saving…';
+  status.className   = 'save-status';
+
+  const res = await put(apiPath, { content });
+  if (res && res.ok) {
+    status.textContent = '✓ Saved';
+    status.className   = 'save-status ok';
+    setTimeout(() => { if (status) { status.textContent = ''; status.className = 'save-status'; } }, 3000);
+  } else {
+    status.textContent = '✗ Error saving';
+    status.className   = 'save-status err';
+  }
+}
+
+// ── Memory ─────────────────────────────────────────────────────────────────
+async function renderMemory() {
+  const data = await get('/api/memory');
+  if (!data) return;
+
+  const dates = data.shortTerm.map(s => s.date);
+  const opts  = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="page-enter">
+      <div class="tabs">
+        <div class="tab active" id="tab-lt" onclick="switchMemTab('lt')">Long-Term</div>
+        <div class="tab" id="tab-st" onclick="switchMemTab('st')">
+          Short-Term
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:6px">${dates.length} files</span>
+        </div>
+      </div>
+
+      <div id="mem-lt">
+        <div class="card" style="margin:0">
+          <div class="card-label">memory.md — always in context</div>
+          <textarea id="memory-ta" class="editor" spellcheck="false">${escHtml(data.longTerm)}</textarea>
+          <div class="save-bar">
+            <span id="mem-save-status" class="save-status"></span>
+            <button class="btn btn-primary" onclick="saveMemory()">Save Changes</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="mem-st" class="hidden">
+        ${dates.length === 0
+          ? `<div class="empty-state"><div class="empty-state-title">NO ENTRIES</div><div class="empty-state-sub">Short-term memory files appear here after conversations.</div></div>`
+          : `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+            <span style="font-size:12px;color:var(--muted)">Date</span>
+            <select id="st-date-select" class="input" onchange="loadShortTerm()">${opts}</select>
+          </div>
+          <div class="card" style="margin:0">
+            <div class="card-label" id="st-card-title"></div>
+            <div id="st-content" class="code-block" style="color:var(--text-2)"></div>
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+
+  if (dates.length > 0) {
+    window._memShortTerm = data.shortTerm;
+    loadShortTerm();
+  }
+}
+
+function switchMemTab(tab) {
+  document.getElementById('tab-lt').classList.toggle('active', tab === 'lt');
+  document.getElementById('tab-st').classList.toggle('active', tab === 'st');
+  document.getElementById('mem-lt').classList.toggle('hidden', tab !== 'lt');
+  document.getElementById('mem-st').classList.toggle('hidden', tab !== 'st');
+}
+
+function loadShortTerm() {
+  const date   = document.getElementById('st-date-select').value;
+  const entry  = window._memShortTerm.find(s => s.date === date);
+  const titleEl = document.getElementById('st-card-title');
+  const bodyEl  = document.getElementById('st-content');
+  if (titleEl) titleEl.textContent = `memory/${date}.md`;
+  if (bodyEl)  bodyEl.textContent  = entry ? entry.content : '(empty)';
+}
+
+async function saveMemory() {
+  const content = document.getElementById('memory-ta').value;
+  const status  = document.getElementById('mem-save-status');
+  status.textContent = 'Saving…';
+  const res = await put('/api/memory/longterm', { content });
+  if (res && res.ok) {
+    status.textContent = '✓ Saved';
+    status.className   = 'save-status ok';
+    setTimeout(() => { if (status) { status.textContent = ''; status.className = 'save-status'; } }, 3000);
+  } else {
+    status.textContent = '✗ Error';
+    status.className   = 'save-status err';
+  }
+}
+
+async function togglePlugin(name, checkbox) {
+  const res = await post(`/api/plugins/${name}/toggle`);
+  if (!res) { checkbox.checked = !checkbox.checked; return; }
+  const badge = document.getElementById(`plugin-badge-${name}`);
+  if (badge) {
+    badge.textContent = res.enabled ? 'enabled' : 'disabled';
+    badge.className   = `badge ${res.enabled ? 'badge-ok' : 'badge-off'}`;
+  }
+  checkbox.checked = res.enabled;
+}
+
+async function viewPluginCode(name) {
+  const block   = document.getElementById(`plugin-code-${name}`);
+  const content = document.getElementById(`plugin-code-content-${name}`);
+  if (block.classList.contains('hidden')) {
+    const data = await get(`/api/plugins/${name}/code`);
+    if (data) content.textContent = data.content;
+    block.classList.remove('hidden');
+  } else {
+    block.classList.add('hidden');
+  }
+}
+
+// ── Schedules ──────────────────────────────────────────────────────────────
+
+// ── Secrets ────────────────────────────────────────────────────────────────
+async function renderSecrets() {
+  const keys = await get('/api/secrets');
+  if (!keys) return;
+
+  const el = document.getElementById('content');
+
+  if (keys.length === 0) {
+    el.innerHTML = `<div class="page-enter empty-state">
+      <div class="empty-state-title">NO SECRETS</div>
+      <div class="empty-state-sub">Secrets are added when you set up plugins via Telegram.</div>
+    </div>`;
+    return;
+  }
+
+  const rows = keys.map(k => `
+    <tr id="secret-row-${escHtml(k)}">
+      <td><span class="mono">${escHtml(k)}</span></td>
+      <td><span class="mono" style="color:var(--muted);letter-spacing:0.15em">••••••••••••</span></td>
+      <td>
+        <button class="btn btn-danger btn-sm" onclick="deleteSecretKey('${escHtml(k)}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="page-enter">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px;font-family:var(--mono)">
+        Secret values are never exposed here. Manage values via the agent in Telegram.
+      </div>
+      <div class="card" style="margin:0">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Key</th><th>Value</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function deleteSecretKey(key) {
+  if (!confirm(`Delete secret "${key}"? Plugins using it will break.`)) return;
+  const res = await del(`/api/secrets/${encodeURIComponent(key)}`);
+  if (res && res.ok) document.getElementById(`secret-row-${key}`)?.remove();
+}
+
+// ── Settings ───────────────────────────────────────────────────────────────
+async function renderSettings() {
+  const [data, prov] = await Promise.all([get('/api/settings'), get('/api/provider')]);
+  if (!data) return;
+
+  const p = prov || { active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6', openai_model: 'gpt-4o', anthropicReady: false, anthropicOAuth: false, openaiReady: false };
+
+  const anthropicModels = [
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fast & cheap' },
+    { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6 — balanced' },
+    { id: 'claude-opus-4-7',           label: 'Opus 4.7 — most capable' },
+  ];
+  const openaiModels = [
+    { id: 'gpt-4o',       label: 'GPT-4o — flagship' },
+    { id: 'gpt-4o-mini',  label: 'GPT-4o mini — fast & cheap' },
+    { id: 'o3',           label: 'o3 — advanced reasoning' },
+    { id: 'o4-mini',      label: 'o4-mini — fast reasoning' },
+  ];
+
+  const modelOpts = (models, current) => models.map(m =>
+    `<option value="${m.id}" ${m.id === current ? 'selected' : ''}>${escHtml(m.label)}</option>`
+  ).join('');
+
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="page-enter" style="display:flex;flex-direction:column;gap:14px">
+
+      <!-- Provider picker -->
+      <div class="card" style="margin:0">
+        <div class="card-label">AI Provider</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+          Active provider applies immediately. The selection is also saved as the default.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+
+          <!-- Anthropic card -->
+          <div id="provider-card-anthropic"
+               onclick="switchProvider('anthropic')"
+               style="
+                 border:1px solid ${p.active==='anthropic' ? 'var(--amber)' : 'var(--border)'};
+                 background:${p.active==='anthropic' ? 'var(--amber-dim)' : 'var(--surface-2)'};
+                 border-radius:8px;padding:16px 14px;cursor:pointer;transition:border-color 0.15s,background 0.15s;
+               ">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Anthropic</div>
+              ${p.active==='anthropic' ? '<span class="badge badge-ok" style="margin-left:auto">Active</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Claude models</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              ${p.anthropicReady
+                ? `<span class="badge badge-ok">API key set</span>`
+                : `<span class="badge badge-warn">No API key</span>`}
+              ${p.anthropicOAuth
+                ? `<span class="badge badge-ok">Claude account connected</span>
+                   <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();disconnectAnthropic()" style="font-size:10px">Disconnect account</button>`
+                : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();importAnthropicCLI()">Connect Claude account ›</button>`}
+            </div>
+          </div>
+
+          <!-- OpenAI card -->
+          <div id="provider-card-openai"
+               style="
+                 border:1px solid ${p.active==='openai' ? 'var(--amber)' : 'var(--border)'};
+                 background:${p.active==='openai' ? 'var(--amber-dim)' : 'var(--surface-2)'};
+                 border-radius:8px;padding:16px 14px;cursor:${p.openaiReady ? 'pointer' : 'default'};transition:border-color 0.15s,background 0.15s;
+               "
+               ${p.openaiReady ? "onclick=\"switchProvider('openai')\"" : ''}>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <div style="font-size:13px;font-weight:600;color:var(--text)">OpenAI</div>
+              ${p.active==='openai' ? '<span class="badge badge-ok" style="margin-left:auto">Active</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">GPT models via ChatGPT subscription</div>
+            ${p.openaiReady
+              ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                   <span class="badge badge-ok">Connected</span>
+                   <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();disconnectOpenAI()" style="font-size:10px">Disconnect</button>
+                 </div>`
+              : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();showOpenAIConnectModal()" style="margin-top:2px">Connect ›</button>`}
+          </div>
+        </div>
+
+        <div id="provider-switch-status" style="font-size:12px;color:var(--muted);min-height:18px"></div>
+
+        <!-- Model selectors -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Anthropic Model</div>
+            <select id="anthropic-model-sel" class="skill-input" style="width:100%;cursor:pointer"
+                    onchange="saveModel('anthropic', this.value)">
+              ${modelOpts(anthropicModels, p.model)}
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">OpenAI Model</div>
+            <select id="openai-model-sel" class="skill-input" style="width:100%;cursor:pointer"
+                    onchange="saveModel('openai', this.value)">
+              ${modelOpts(openaiModels, p.openai_model)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Raw settings.json -->
+      <div class="card" style="margin:0">
+        <div class="card-label">settings.json</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
+          Advanced — edit raw config. Provider and model changes above are reflected here on next load.
+        </div>
+        <textarea id="settings-ta" class="editor" style="min-height:200px" spellcheck="false">${escHtml(JSON.stringify(data.content, null, 2))}</textarea>
+        <div class="save-bar">
+          <span id="settings-status" class="save-status"></span>
+          <button class="btn btn-primary" onclick="saveSettings()">Save Changes</button>
+        </div>
+      </div>
+
+    </div>
+  `;
+}
+
+async function switchProvider(provider) {
+  const st = document.getElementById('provider-switch-status');
+  st.textContent = 'Switching…';
+  st.style.color = 'var(--muted)';
+  const res = await post('/api/provider/switch', { provider });
+  if (res && res.ok) {
+    st.textContent = `Switched to ${provider}.`;
+    st.style.color = 'var(--green)';
+    setTimeout(() => renderSettings(), 600);
+  } else {
+    st.textContent = res?.error || 'Switch failed.';
+    st.style.color = 'var(--red)';
+  }
+}
+
+async function saveModel(provider, model) {
+  await post('/api/provider/model', { provider, model });
+}
+
+// ── OpenAI connect modal ──────────────────────────────────────────────────────
+function showOpenAIConnectModal(tab) {
+  if (document.getElementById('openai-connect-modal')) return;
+  const modal = document.createElement('div');
+  modal.className = 'skill-modal-bg';
+  modal.id = 'openai-connect-modal';
+  modal.innerHTML = `
+    <div class="skill-modal" style="max-width:460px">
+      <div class="skill-modal-title">Connect OpenAI</div>
+      <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px">
+        <button id="oai-tab-browser" onclick="openAIShowTab('browser')"
+          style="background:none;border:none;padding:8px 14px;font-size:12px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">
+          Browser login
+        </button>
+        <button id="oai-tab-device" onclick="openAIShowTab('device')"
+          style="background:none;border:none;padding:8px 14px;font-size:12px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">
+          Device code
+        </button>
+      </div>
+
+      <!-- Browser tab -->
+      <div id="oai-panel-browser">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.6">
+          Sign in with your <strong>ChatGPT account</strong> in a popup window.
+          Works when accessing the dashboard from the same machine as Atrex.
+        </p>
+        <div id="openai-poll-status" style="font-size:12px;color:var(--muted);min-height:18px;margin-bottom:16px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-secondary" onclick="closeOpenAIModal()">Cancel</button>
+          <button class="btn btn-primary" id="openai-connect-btn" onclick="startOpenAIPopup()">Open Login Window</button>
+        </div>
+      </div>
+
+      <!-- Device code tab -->
+      <div id="oai-panel-device" style="display:none">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.6">
+          Open the link below in any browser, enter the code, and approve. Works from any device.
+        </p>
+        <div id="oai-device-body">
+          <button class="btn btn-primary" onclick="startOpenAIDeviceCode()" style="width:100%">Generate code</button>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button class="btn btn-secondary" onclick="closeOpenAIModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', e => { if (e.target === modal) closeOpenAIModal(); });
+  document.body.appendChild(modal);
+  openAIShowTab(tab || 'browser');
+}
+
+function openAIShowTab(name) {
+  ['browser','device'].forEach(t => {
+    const btn   = document.getElementById(`oai-tab-${t}`);
+    const panel = document.getElementById(`oai-panel-${t}`);
+    const active = t === name;
+    if (btn)   { btn.style.borderBottomColor = active ? 'var(--amber)' : 'transparent'; btn.style.color = active ? 'var(--text)' : 'var(--muted)'; }
+    if (panel) panel.style.display = active ? '' : 'none';
+  });
+}
+
+function startOpenAIPopup() {
+  const btn = document.getElementById('openai-connect-btn');
+  btn.disabled = true;
+  btn.textContent = 'Waiting…';
+
+  const w = 520, h = 680;
+  const left = Math.round(window.screenX + (window.outerWidth - w) / 2);
+  const top  = Math.round(window.screenY + (window.outerHeight - h) / 2);
+  const popup = window.open('/auth/openai', 'openai-oauth',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`);
+
+  if (!popup) { window.location.href = '/auth/openai'; return; }
+
+  const statusEl = document.getElementById('openai-poll-status');
+  const deadline = Date.now() + 5 * 60 * 1000;
+
+  function onConnected() {
+    clearTimeout(window._openaiPollTimer);
+    window.removeEventListener('message', msgHandler);
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green)">✓ Connected!</span>';
+    setTimeout(() => { closeOpenAIModal(); renderSettings(); }, 500);
+  }
+  function msgHandler(e) { if (e.data && e.data.type === 'openai-connected') onConnected(); }
+  window.addEventListener('message', msgHandler);
+
+  async function pollStatus() {
+    if (!document.getElementById('openai-connect-modal')) { window.removeEventListener('message', msgHandler); return; }
+    if (Date.now() > deadline) {
+      window.removeEventListener('message', msgHandler);
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Timed out. Try again.</span>';
+      return;
+    }
+    const r = await get('/auth/openai/status');
+    if (r && r.connected) { if (!popup.closed) { try { popup.close(); } catch {} } onConnected(); return; }
+    if (popup.closed) {
+      window.removeEventListener('message', msgHandler);
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Window closed. Try again.</span>';
+      const b = document.getElementById('openai-connect-btn');
+      if (b) { b.disabled = false; b.textContent = 'Open Login Window'; }
+      return;
+    }
+    window._openaiPollTimer = setTimeout(pollStatus, 2000);
+  }
+  window._openaiPollTimer = setTimeout(pollStatus, 2000);
+}
+
+async function startOpenAIDeviceCode() {
+  const body = document.getElementById('oai-device-body');
+  body.innerHTML = '<span style="font-size:12px;color:var(--muted)">Requesting code…</span>';
+  const data = await get('/auth/openai/device-start');
+  if (!data || data.error) {
+    body.innerHTML = `<span style="font-size:12px;color:var(--red)">${data?.error || 'Failed to start'}</span>
+      <br><button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="startOpenAIDeviceCode()">Retry</button>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">1. Open this URL</div>
+      <a href="${escHtml(data.verification_uri)}" target="_blank"
+         style="font-size:13px;color:var(--amber);word-break:break-all">${escHtml(data.verification_uri)}</a>
+    </div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">2. Enter this code</div>
+      <div style="font-family:var(--mono);font-size:22px;letter-spacing:0.15em;color:var(--text);background:var(--surface-3);
+                  border:1px solid var(--border-2);border-radius:6px;padding:10px 14px;display:inline-block">${escHtml(data.user_code)}</div>
+      <button onclick="navigator.clipboard.writeText('${escHtml(data.user_code)}')" title="Copy"
+        style="background:none;border:none;cursor:pointer;margin-left:8px;color:var(--muted);vertical-align:middle;font-size:14px">⎘</button>
+    </div>
+    <div id="oai-device-status" style="font-size:12px;color:var(--muted);min-height:18px">Waiting for approval…</div>
+  `;
+
+  const deadline = Date.now() + 15 * 60 * 1000;
+  const intervalMs = (data.interval ?? 5) * 1000;
+
+  async function poll() {
+    if (!document.getElementById('openai-connect-modal')) return;
+    if (Date.now() > deadline) {
+      const st = document.getElementById('oai-device-status');
+      if (st) st.innerHTML = '<span style="color:var(--red)">Timed out. Refresh and try again.</span>';
+      return;
+    }
+    const res = await post('/auth/openai/device-poll', { device_auth_id: data.device_auth_id, user_code: data.user_code }) || {};
+
+    if (res.ok) {
+      const st = document.getElementById('oai-device-status');
+      if (st) st.innerHTML = '<span style="color:var(--green)">✓ Connected!</span>';
+      setTimeout(() => { closeOpenAIModal(); renderSettings(); }, 600);
+      return;
+    }
+    if (res.pending) {
+      window._openaiDeviceTimer = setTimeout(poll, intervalMs);
+      return;
+    }
+    const st = document.getElementById('oai-device-status');
+    if (st) st.innerHTML = `<span style="color:var(--red)">${escHtml(res.error || 'Error')}</span>`;
+  }
+
+  window._openaiDeviceTimer = setTimeout(poll, intervalMs);
+}
+
+function closeOpenAIModal() {
+  clearTimeout(window._openaiPollTimer);
+  clearTimeout(window._openaiDeviceTimer);
+  window._openaiPollTimer = null;
+  window._openaiDeviceTimer = null;
+  document.getElementById('openai-connect-modal')?.remove();
+}
+
+async function disconnectOpenAI() {
+  if (!confirm('Disconnect OpenAI? You will need to re-authenticate to use GPT models.')) return;
+  const res = await del('/auth/openai') || {};
+  if (res.ok) renderSettings();
+  else alert(res.error || 'Disconnect failed.');
+}
+
+// ── Anthropic CLI import ──────────────────────────────────────────────────────
+async function importAnthropicCLI() {
+  const modal = document.createElement('div');
+  modal.className = 'skill-modal-bg';
+  modal.id = 'anthropic-connect-modal';
+  modal.innerHTML = `
+    <div class="skill-modal" style="max-width:440px">
+      <div class="skill-modal-title">Connect Anthropic</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.6">
+        This will read your existing <strong>Claude Code CLI</strong> credentials
+        from the system keychain and store them here. No new login is needed.
+      </p>
+      <div id="anthropic-import-status" style="font-size:13px;min-height:20px;margin-bottom:16px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeAnthropicModal()">Cancel</button>
+        <button class="btn btn-primary" id="anthropic-import-btn" onclick="doAnthropicImport()">Import Credentials</button>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', e => { if (e.target === modal) closeAnthropicModal(); });
+  document.body.appendChild(modal);
+}
+
+async function doAnthropicImport() {
+  const statusEl = document.getElementById('anthropic-import-status');
+  const btn = document.getElementById('anthropic-import-btn');
+  statusEl.innerHTML = '<span style="color:var(--muted)">Importing…</span>';
+  btn.disabled = true;
+
+  const res = await post('/auth/anthropic/import-cli', {});
+  if (res && res.ok) {
+    statusEl.innerHTML = '<span style="color:var(--green)">Connected! Credentials imported.</span>';
+    setTimeout(() => { closeAnthropicModal(); renderSettings(); }, 800);
+  } else {
+    statusEl.innerHTML = `<span style="color:var(--red)">${escHtml(res?.error || 'Import failed.')}</span>`;
+    btn.disabled = false;
+  }
+}
+
+function closeAnthropicModal() {
+  document.getElementById('anthropic-connect-modal')?.remove();
+}
+
+async function disconnectAnthropic() {
+  if (!confirm('Disconnect Anthropic OAuth? The bot will fall back to ANTHROPIC_API_KEY if set.')) return;
+  await del('/auth/anthropic');
+  renderSettings();
+}
+
+async function saveSettings() {
+  const raw    = document.getElementById('settings-ta').value;
+  const status = document.getElementById('settings-status');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    status.textContent = '✗ Invalid JSON: ' + e.message;
+    status.className   = 'save-status err';
+    return;
+  }
+
+  status.textContent = 'Saving…';
+  const res = await put('/api/settings', { content: parsed });
+  if (res && res.ok) {
+    status.textContent = '✓ Saved — restart to apply';
+    status.className   = 'save-status ok';
+  } else {
+    status.textContent = '✗ Error saving';
+    status.className   = 'save-status err';
+  }
+}
+
+// ── Skills ────────────────────────────────────────────────────────────────
+async function renderSkills() {
+  const data = await get('/api/skills');
+  if (!data) return;
+
+  const el = document.getElementById('content');
+  const { skills, activeId } = data;
+
+  const cards = skills.map((s, i) => {
+    const isActive = s.id === activeId;
+    const isMain   = s.id === 'main';
+    return `
+      <div class="skill-card${isActive ? ' skill-active' : ''}" id="skill-card-${s.id}" style="animation-delay:${i * 40}ms">
+        <div class="skill-head" onclick="toggleSkill('${s.id}')">
+          <div class="skill-dot"></div>
+          <div class="skill-info">
+            <div class="skill-name">${escHtml(s.name)}${isActive ? ' <span style="font-family:var(--sans);font-size:10px;color:var(--amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-left:6px">Active</span>' : ''}</div>
+            <div class="skill-desc">${escHtml(s.description) || '<span style="color:var(--border-2)">No description</span>'}</div>
+          </div>
+          <span class="skill-chevron">›</span>
+        </div>
+        <div class="skill-body">
+          <div class="skill-field">
+            <div class="skill-field-label">Name</div>
+            <input class="skill-input" id="skill-name-${s.id}" value="${escHtml(s.name)}" placeholder="Skill name" />
+          </div>
+          <div class="skill-field">
+            <div class="skill-field-label">Description</div>
+            <input class="skill-input" id="skill-desc-${s.id}" value="${escHtml(s.description)}" placeholder="Short description" />
+          </div>
+          <div class="skill-field">
+            <div class="skill-field-label">Model
+              <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--border-2);margin-left:6px">override global model for this skill</span>
+            </div>
+            <select class="skill-input" id="skill-model-${s.id}" style="cursor:pointer">
+              <option value="" ${!s.model ? 'selected' : ''}>Global default</option>
+              <option value="claude-haiku-4-5-20251001" ${s.model === 'claude-haiku-4-5-20251001' ? 'selected' : ''}>Haiku 4.5 — fast &amp; cheap</option>
+              <option value="claude-sonnet-4-6" ${s.model === 'claude-sonnet-4-6' ? 'selected' : ''}>Sonnet 4.6 — balanced</option>
+              <option value="claude-opus-4-7" ${s.model === 'claude-opus-4-7' ? 'selected' : ''}>Opus 4.7 — most capable</option>
+            </select>
+          </div>
+          <div class="skill-field" style="margin-bottom:0">
+            <div class="skill-field-label">Focus Instructions
+              <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--border-2);margin-left:6px">loaded by the agent when this skill is activated</span>
+            </div>
+            <textarea class="skill-prompt" id="skill-prompt-${s.id}" placeholder="e.g. Focus on fitness, workouts, and nutrition. Track workout progress in skill memory.">${escHtml(s.systemPrompt)}</textarea>
+          </div>
+          <div class="skill-actions">
+            ${!isActive ? `<button class="btn btn-secondary btn-sm" onclick="activateSkill('${s.id}')">Set Active</button>` : ''}
+            <button class="btn btn-primary btn-sm" onclick="saveSkill('${s.id}')">Save</button>
+            ${!isMain ? `<button class="btn btn-danger btn-sm" onclick="deleteSkill('${s.id}')">Delete</button>` : ''}
+            <span class="skill-save-status" id="skill-status-${s.id}"></span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="page-enter">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--muted)">Specialized modes the agent auto-activates. Use <span style="font-family:var(--mono);color:var(--amber)">/skill &lt;name&gt;</span> to manually override.</div>
+        <button class="btn btn-primary btn-sm" onclick="showNewSkillModal()">+ New Skill</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">${cards || '<div class="empty-state"><div class="empty-state-title">NO SKILLS</div></div>'}</div>
+    </div>
+  `;
+}
+
+function toggleSkill(id) {
+  const card = document.getElementById(`skill-card-${id}`);
+  card.classList.toggle('skill-open');
+}
+
+async function activateSkill(id) {
+  const res = await post(`/api/skills/${id}/activate`);
+  if (!res || !res.ok) return;
+  renderSkills();
+}
+
+async function saveSkill(id) {
+  const name        = document.getElementById(`skill-name-${id}`)?.value?.trim();
+  const description = document.getElementById(`skill-desc-${id}`)?.value?.trim();
+  const systemPrompt= document.getElementById(`skill-prompt-${id}`)?.value;
+  const model       = document.getElementById(`skill-model-${id}`)?.value || undefined;
+  const status      = document.getElementById(`skill-status-${id}`);
+
+  status.textContent = 'Saving…';
+  status.className   = 'skill-save-status';
+
+  const res = await put(`/api/skills/${id}`, { name, description, systemPrompt, model });
+  if (res && res.id) {
+    status.textContent = '✓ Saved';
+    status.className   = 'skill-save-status ok';
+    const card = document.getElementById(`skill-card-${id}`);
+    const nameEl = card?.querySelector('.skill-name');
+    const descEl = card?.querySelector('.skill-desc');
+    if (nameEl) {
+      const activeSpan = nameEl.querySelector('span');
+      nameEl.textContent = res.name + ' ';
+      if (activeSpan) nameEl.appendChild(activeSpan);
+    }
+    if (descEl) descEl.textContent = res.description || '';
+    setTimeout(() => { if (status) { status.textContent = ''; status.className = 'skill-save-status'; } }, 3000);
+  } else {
+    status.textContent = '✗ Error';
+    status.className   = 'skill-save-status err';
+  }
+}
+
+async function deleteSkill(id) {
+  if (!confirm(`Delete skill "${id}"? This cannot be undone.`)) return;
+  const res = await del(`/api/skills/${id}`);
+  if (res && res.ok) {
+    document.getElementById(`skill-card-${id}`)?.remove();
+  }
+}
+
+function showNewSkillModal() {
+  const modal = document.createElement('div');
+  modal.className = 'skill-modal-bg';
+  modal.id = 'skill-new-modal';
+  modal.innerHTML = `
+    <div class="skill-modal">
+      <div class="skill-modal-title">New Skill</div>
+      <div class="skill-field">
+        <div class="skill-field-label">Name <span style="color:var(--amber)">*</span></div>
+        <input id="new-skill-name" class="skill-input" placeholder="e.g. Personal Trainer" autofocus />
+      </div>
+      <div class="skill-field">
+        <div class="skill-field-label">Description</div>
+        <input id="new-skill-desc" class="skill-input" placeholder="e.g. Fitness and workout focused" />
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:18px">
+        Edit the focus instructions after creating the skill.
+      </div>
+      <div id="new-skill-err" style="font-size:12px;color:var(--red);margin-bottom:12px;display:none"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeNewSkillModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createNewSkill()">Create</button>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeNewSkillModal(); });
+  document.body.appendChild(modal);
+  setTimeout(() => document.getElementById('new-skill-name')?.focus(), 50);
+  document.getElementById('new-skill-name').addEventListener('keydown', e => { if (e.key === 'Enter') createNewSkill(); });
+}
+
+function closeNewSkillModal() {
+  document.getElementById('skill-new-modal')?.remove();
+}
+
+async function createNewSkill() {
+  const name = document.getElementById('new-skill-name')?.value?.trim();
+  const desc = document.getElementById('new-skill-desc')?.value?.trim();
+  const errEl = document.getElementById('new-skill-err');
+
+  if (!name) {
+    errEl.textContent = 'Name is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const res = await post('/api/skills', { name, description: desc || '' });
+  if (res && res.id) {
+    closeNewSkillModal();
+    renderSkills();
+  } else {
+    errEl.textContent = res?.error || 'Failed to create skill.';
+    errEl.style.display = 'block';
+  }
+}
+
+// ── Logs ───────────────────────────────────────────────────────────────────
+async function renderLogs() {
+  const files = await get('/api/logs');
+  if (!files) return;
+
+  const el = document.getElementById('content');
+
+  if (files.length === 0) {
+    el.innerHTML = `<div class="page-enter empty-state">
+      <div class="empty-state-title">NO LOGS</div>
+    </div>`;
+    return;
+  }
+
+  const opts = files.map(f =>
+    `<option value="${f.filename}">${f.date} — ${formatBytes(f.size)}</option>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="page-enter">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <span style="font-size:12px;color:var(--muted)">File</span>
+        <select id="log-select" class="input" onchange="loadLogFile()">${opts}</select>
+        <button class="btn btn-secondary btn-sm" onclick="loadLogFile()">Refresh</button>
+      </div>
+      <div class="card" style="margin:0;padding:0">
+        <div id="log-viewer" style="padding:18px;max-height:620px;overflow-y:auto">
+          <div style="color:var(--muted);font-family:var(--mono);font-size:12px">Loading…</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  loadLogFile();
+}
+
+async function loadLogFile() {
+  const select = document.getElementById('log-select');
+  if (!select) return;
+  const filename = select.value;
+  const viewer   = document.getElementById('log-viewer');
+  viewer.innerHTML = '<div style="color:var(--muted);font-family:var(--mono);font-size:12px">Loading…</div>';
+
+  const data = await get(`/api/logs/${filename}`);
+  if (!data) return;
+
+  const lines = data.content.split('\n').filter(Boolean);
+  if (!lines.length) {
+    viewer.innerHTML = '<div class="empty-state"><div class="empty-state-title" style="font-size:16px">EMPTY</div></div>';
+    return;
+  }
+
+  viewer.innerHTML = lines.map(line =>
+    `<div class="log-line ${logLineClass(line)}">${escHtml(line)}</div>`
+  ).join('');
+
+  viewer.scrollTop = viewer.scrollHeight;
+}
+
+function logLineClass(line) {
+  if (line.includes('[INFO]') || line.includes('INFO'))   return 'info';
+  if (line.includes('[OK]')   || line.includes(' OK '))   return 'ok';
+  if (line.includes('[WARN]') || line.includes('WARN'))   return 'warn';
+  if (line.includes('[ERROR]')|| line.includes(' ERR'))   return 'err';
+  if (line.includes('[AGENT]')|| line.includes('AGENT'))  return 'agent';
+  if (line.includes('[TOOL]') || line.includes('TOOL'))   return 'tool';
+  return 'default';
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024)          return `${bytes}B`;
+  if (bytes < 1024 * 1024)   return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

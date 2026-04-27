@@ -1,0 +1,17 @@
+services:
+  atrexai:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Dashboard bound to localhost only — never expose this port publicly
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # config/ — writable so ensureConfigDefaults() can create missing files
+      # and so the setup wizard can write settings/plugins on first boot
+      - ./config:/app/config
+      # plugins/ — agent creates new plugins here at runtime
+      - ./plugins:/app/plugins
+      # memory/ and logs/ — persist across container restarts
+      - ./memory:/app/memory
+      - ./logs:/app/logs

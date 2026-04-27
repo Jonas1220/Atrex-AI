@@ -1,0 +1,42 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+plugins/*/index.js
+
+# ── Credentials & secrets (never commit) ──────────────────────────────────────
+.env
+config/secrets.json
+config/whatsapp-auth/
+
+# ── Personal / runtime config (machine-specific) ──────────────────────────────
+config/plugins.json
+config/schedules.json
+config/settings.json
+config/soul.md
+config/user.md
+config/heartbeat.md
+config/contexts/
+config/skills/
+config/runtime.json
+
+# ── Runtime data ──────────────────────────────────────────────────────────────
+logs/
+memory/
+output/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Landingpage ───────────────────────────────────────────────────────────────
+/landingpage
+
+# ── CLAUDE ────────────────────────────────────────────────────────────────────
+CLAUDE.md
+.CLAUDE
+# ── MD files ──────────────────────────────────────────────────────────────────
+codex.md
+opus.md
+next_steps.md
+plan.md
