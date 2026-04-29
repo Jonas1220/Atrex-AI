@@ -919,11 +919,40 @@
       </div>
 
       <div class="wizard-field">
-        <div class="wizard-label">Anthropic API Key <span class="wizard-req">*</span></div>
-        <input id="w-anth-key" class="wizard-input" type="password"
-               placeholder="sk-ant-…" autocomplete="off" />
-        <div class="wizard-hint">
-          Get yours at <strong>console.anthropic.com</strong> → API Keys.
+        <div class="wizard-label">AI Provider <span class="wizard-req">*</span></div>
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <button id="wprov-anthropic" onclick="selectWizardProvider('anthropic')"
+            style="flex:1;padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--amber);background:var(--amber-dim);color:var(--amber);cursor:pointer;transition:all 0.15s">
+            Anthropic
+          </button>
+          <button id="wprov-nvidia" onclick="selectWizardProvider('nvidia')"
+            style="flex:1;padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            NVIDIA
+          </button>
+          <button id="wprov-openai" onclick="selectWizardProvider('openai')"
+            style="flex:1;padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            OpenAI
+          </button>
+        </div>
+        <div id="wprov-fields-anthropic">
+          <input id="w-anth-key" class="wizard-input" type="password"
+                 placeholder="sk-ant-…" autocomplete="off" />
+          <div class="wizard-hint" style="margin-top:8px">
+            Get yours at <strong>console.anthropic.com</strong> → API Keys.
+          </div>
+        </div>
+        <div id="wprov-fields-nvidia" style="display:none">
+          <input id="w-nvidia-key" class="wizard-input" type="password"
+                 placeholder="nvapi-…" autocomplete="off" />
+          <div class="wizard-hint" style="margin-top:8px">
+            Get yours at <strong>build.nvidia.com</strong> → API Keys. Free tier available.
+          </div>
+        </div>
+        <div id="wprov-fields-openai" style="display:none">
+          <div class="wizard-hint" style="margin-bottom:0;padding:12px;background:var(--surface-2);border-radius:6px;border:1px solid var(--border)">
+            OpenAI uses OAuth — no API key needed here.<br>
+            Connect your ChatGPT account from the Settings page after setup.
+          </div>
         </div>
       </div>
 
@@ -1128,6 +1157,7 @@
       <div class="nav-group">
         <div class="nav-section">Identity</div>
         <div class="nav-item" data-page="skills">Skills</div>
+        <div class="nav-item" data-page="agents">Agents</div>
         <div class="nav-item" data-page="soul">Soul</div>
         <div class="nav-item" data-page="user">User Profile</div>
       </div>
@@ -1180,10 +1210,11 @@ async function api(method, path, body) {
   return res.json();
 }
 
-const get  = (path)       => api('GET',    path);
-const put  = (path, body) => api('PUT',    path, body);
-const post = (path, body) => api('POST',   path, body ?? {});
-const del  = (path)       => api('DELETE', path);
+const get   = (path)       => api('GET',    path);
+const put   = (path, body) => api('PUT',    path, body);
+const patch = (path, body) => api('PATCH',  path, body);
+const post  = (path, body) => api('POST',   path, body ?? {});
+const del   = (path)       => api('DELETE', path);
 
 // ── Auth / Setup ───────────────────────────────────────────────────────────
 async function init() {
@@ -1251,15 +1282,35 @@ function toggleService(name) {
   document.getElementById(`wsvc-${name}`).classList.toggle('open');
 }
 
+let _wizardProvider = 'anthropic';
+
+function selectWizardProvider(p) {
+  _wizardProvider = p;
+  ['anthropic', 'nvidia', 'openai'].forEach(id => {
+    const btn = document.getElementById(`wprov-${id}`);
+    const fields = document.getElementById(`wprov-fields-${id}`);
+    const active = id === p;
+    btn.style.borderColor    = active ? 'var(--amber)'    : 'var(--border-2)';
+    btn.style.background     = active ? 'var(--amber-dim)': 'transparent';
+    btn.style.color          = active ? 'var(--amber)'    : 'var(--text-2)';
+    fields.style.display = active ? '' : 'none';
+  });
+}
+
 async function wizardSaveCore() {
   const tg    = document.getElementById('w-tg-token').value.trim();
-  const anth  = document.getElementById('w-anth-key').value.trim();
   const ids   = document.getElementById('w-user-ids').value.trim();
   const adm   = document.getElementById('w-admin-token').value.trim();
   const errEl = document.getElementById('w-core-err');
 
-  if (!tg || !anth) {
-    errEl.textContent = 'Telegram Bot Token and Anthropic API Key are required.';
+  const anth  = document.getElementById('w-anth-key')?.value.trim() || '';
+  const nvidia = document.getElementById('w-nvidia-key')?.value.trim() || '';
+
+  const hasKey = _wizardProvider === 'openai' || anth || nvidia;
+  if (!tg || !hasKey) {
+    errEl.textContent = _wizardProvider === 'openai'
+      ? 'Telegram Bot Token is required.'
+      : `Telegram Bot Token and ${_wizardProvider === 'nvidia' ? 'NVIDIA' : 'Anthropic'} API Key are required.`;
     errEl.classList.remove('hidden');
     return;
   }
@@ -1268,7 +1319,14 @@ async function wizardSaveCore() {
   const res = await fetch('/setup/core', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ telegramToken: tg, anthropicKey: anth, allowedUserIds: ids, adminToken: adm }),
+    body: JSON.stringify({
+      telegramToken: tg,
+      ...(anth   ? { anthropicKey: anth }  : {}),
+      ...(nvidia  ? { nvidiaKey: nvidia }   : {}),
+      provider: _wizardProvider,
+      allowedUserIds: ids,
+      adminToken: adm,
+    }),
   }).then(r => r.json()).catch(() => null);
 
   if (!res || !res.ok) {
@@ -1314,7 +1372,7 @@ async function wizardFinish(skip) {
   // Build done list
   const allItems = [
     { label: 'Telegram Bot Token',    done: _wizardCoreWritten },
-    { label: 'Anthropic API Key',     done: _wizardCoreWritten },
+    { label: 'AI Provider',            done: _wizardCoreWritten },
     { label: 'Google OAuth',          done: _wizardDoneItems.includes('GOOGLE_CLIENT_ID') },
     { label: 'Notion',                done: _wizardDoneItems.includes('NOTION_API_KEY') },
     { label: 'Todoist',               done: _wizardDoneItems.includes('TODOIST_API_KEY') },
@@ -1370,6 +1428,7 @@ document.getElementById('token-input').addEventListener('keydown', e => {
 const PAGE_TITLES = {
   dashboard:    'Dashboard',
   skills:       'Skills',
+  agents:       'Agents',
   soul:         'Soul',
   user:         'User Profile',
   memory:       'Memory',
@@ -1425,6 +1484,7 @@ async function render(page) {
     switch (page) {
       case 'dashboard': await renderDashboard(); break;
       case 'skills':    await renderSkills();     break;
+      case 'agents':    await renderAgents();     break;
       case 'soul':      await renderEditor('/api/soul',  'soul.md',  'Personality & Behavior Rules'); break;
       case 'user':      await renderEditor('/api/user',  'user.md',  'User Profile — auto-updated by agent'); break;
       case 'memory':    await renderMemory();    break;
@@ -2023,7 +2083,10 @@ async function renderSettings() {
   const [data, prov] = await Promise.all([get('/api/settings'), get('/api/provider')]);
   if (!data) return;
 
-  const p = prov || { active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6', openai_model: 'gpt-4o', anthropicReady: false, anthropicOAuth: false, openaiReady: false };
+  const p = prov || {
+    active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
+    anthropicReady: false, anthropicOAuth: false, openaiReady: false, nvidiaReady: false,
+  };
 
   const anthropicModels = [
     { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fast & cheap' },
@@ -2031,15 +2094,75 @@ async function renderSettings() {
     { id: 'claude-opus-4-7',           label: 'Opus 4.7 — most capable' },
   ];
   const openaiModels = [
-    { id: 'gpt-4o',       label: 'GPT-4o — flagship' },
-    { id: 'gpt-4o-mini',  label: 'GPT-4o mini — fast & cheap' },
-    { id: 'o3',           label: 'o3 — advanced reasoning' },
-    { id: 'o4-mini',      label: 'o4-mini — fast reasoning' },
+    { id: 'gpt-4o',      label: 'GPT-4o — flagship' },
+    { id: 'gpt-4o-mini', label: 'GPT-4o mini — fast & cheap' },
+    { id: 'o3',          label: 'o3 — advanced reasoning' },
+    { id: 'o4-mini',     label: 'o4-mini — fast reasoning' },
+  ];
+  const nvidiaModels = [
+    { id: 'moonshotai/kimi-k2.5',     label: 'Kimi K2.5 — extended thinking' },
+    { id: 'meta/llama-4-maverick-17b-128e-instruct', label: 'Llama 4 Maverick 17B' },
+    { id: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', label: 'Nemotron Ultra 253B' },
   ];
 
   const modelOpts = (models, current) => models.map(m =>
     `<option value="${m.id}" ${m.id === current ? 'selected' : ''}>${escHtml(m.label)}</option>`
   ).join('');
+
+  const provCard = (id, label, subtitle, badges, actions, clickable) => `
+    <div id="provider-card-${id}"
+         ${clickable ? `onclick="switchProvider('${id}')"` : ''}
+         style="border:1px solid ${p.active===id ? 'var(--amber)' : 'var(--border)'};
+                background:${p.active===id ? 'var(--amber-dim)' : 'var(--surface-2)'};
+                border-radius:8px;padding:16px 14px;
+                cursor:${clickable ? 'pointer' : 'default'};
+                transition:border-color 0.15s,background 0.15s;
+                display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${label}</div>
+        ${p.active===id ? '<span class="badge badge-ok" style="margin-left:auto">Active</span>' : ''}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${subtitle}</div>
+      ${badges}
+      ${actions}
+    </div>`;
+
+  const anthropicBadges = p.anthropicReady
+    ? `<span class="badge badge-ok">API key set</span>`
+    : `<span class="badge badge-warn">No API key</span>`;
+  const anthropicActions = `
+    ${p.anthropicOAuth
+      ? `<span class="badge badge-ok">Claude account connected</span>
+         <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();disconnectAnthropic()" style="font-size:10px">Disconnect account</button>`
+      : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();importAnthropicCLI()">Connect Claude account ›</button>`}
+    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="anthropic-key-input" type="password" placeholder="Update API key…"
+             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
+             autocomplete="off" />
+      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('anthropic')">Save</button>
+    </div>`;
+
+  const nvidiaClickable = p.nvidiaReady;
+  const nvidiaBadges = p.nvidiaReady
+    ? `<span class="badge badge-ok">API key set</span>`
+    : `<span class="badge badge-warn">No API key</span>`;
+  const nvidiaActions = `
+    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="nvidia-key-input" type="password" placeholder="${p.nvidiaReady ? 'Update API key…' : 'nvapi-…'}"
+             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
+             autocomplete="off" />
+      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('nvidia')">Save</button>
+    </div>`;
+
+  const openaiClickable = p.openaiReady;
+  const openaiActions = p.openaiReady
+    ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+         <span class="badge badge-ok">Connected</span>
+         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();disconnectOpenAI()" style="font-size:10px">Disconnect</button>
+       </div>`
+    : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();showOpenAIConnectModal()">Connect ›</button>`;
 
   const el = document.getElementById('content');
   el.innerHTML = `
@@ -2049,60 +2172,19 @@ async function renderSettings() {
       <div class="card" style="margin:0">
         <div class="card-label">AI Provider</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
-          Active provider applies immediately. The selection is also saved as the default.
+          Click a provider to make it active. API keys and model selection are saved immediately.
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
 
-          <!-- Anthropic card -->
-          <div id="provider-card-anthropic"
-               onclick="switchProvider('anthropic')"
-               style="
-                 border:1px solid ${p.active==='anthropic' ? 'var(--amber)' : 'var(--border)'};
-                 background:${p.active==='anthropic' ? 'var(--amber-dim)' : 'var(--surface-2)'};
-                 border-radius:8px;padding:16px 14px;cursor:pointer;transition:border-color 0.15s,background 0.15s;
-               ">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <div style="font-size:13px;font-weight:600;color:var(--text)">Anthropic</div>
-              ${p.active==='anthropic' ? '<span class="badge badge-ok" style="margin-left:auto">Active</span>' : ''}
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Claude models</div>
-            <div style="display:flex;flex-direction:column;gap:6px">
-              ${p.anthropicReady
-                ? `<span class="badge badge-ok">API key set</span>`
-                : `<span class="badge badge-warn">No API key</span>`}
-              ${p.anthropicOAuth
-                ? `<span class="badge badge-ok">Claude account connected</span>
-                   <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();disconnectAnthropic()" style="font-size:10px">Disconnect account</button>`
-                : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();importAnthropicCLI()">Connect Claude account ›</button>`}
-            </div>
-          </div>
-
-          <!-- OpenAI card -->
-          <div id="provider-card-openai"
-               style="
-                 border:1px solid ${p.active==='openai' ? 'var(--amber)' : 'var(--border)'};
-                 background:${p.active==='openai' ? 'var(--amber-dim)' : 'var(--surface-2)'};
-                 border-radius:8px;padding:16px 14px;cursor:${p.openaiReady ? 'pointer' : 'default'};transition:border-color 0.15s,background 0.15s;
-               "
-               ${p.openaiReady ? "onclick=\"switchProvider('openai')\"" : ''}>
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <div style="font-size:13px;font-weight:600;color:var(--text)">OpenAI</div>
-              ${p.active==='openai' ? '<span class="badge badge-ok" style="margin-left:auto">Active</span>' : ''}
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">GPT models via ChatGPT subscription</div>
-            ${p.openaiReady
-              ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                   <span class="badge badge-ok">Connected</span>
-                   <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();disconnectOpenAI()" style="font-size:10px">Disconnect</button>
-                 </div>`
-              : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();showOpenAIConnectModal()" style="margin-top:2px">Connect ›</button>`}
-          </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+          ${provCard('anthropic', 'Anthropic', 'Claude models', anthropicBadges, anthropicActions, true)}
+          ${provCard('nvidia', 'NVIDIA NIM', 'Kimi K2.5 and other models', nvidiaBadges, nvidiaActions, nvidiaClickable)}
+          ${provCard('openai', 'OpenAI', 'GPT models via ChatGPT account', '', openaiActions, openaiClickable)}
         </div>
 
         <div id="provider-switch-status" style="font-size:12px;color:var(--muted);min-height:18px"></div>
 
-        <!-- Model selectors -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+        <!-- Provider model selectors -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px">
           <div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Anthropic Model</div>
             <select id="anthropic-model-sel" class="skill-input" style="width:100%;cursor:pointer"
@@ -2111,10 +2193,17 @@ async function renderSettings() {
             </select>
           </div>
           <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">NVIDIA Model</div>
+            <select id="nvidia-model-sel" class="skill-input" style="width:100%;cursor:pointer"
+                    onchange="saveModel('nvidia', this.value)">
+              ${modelOpts(nvidiaModels, p.model)}
+            </select>
+          </div>
+          <div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">OpenAI Model</div>
             <select id="openai-model-sel" class="skill-input" style="width:100%;cursor:pointer"
                     onchange="saveModel('openai', this.value)">
-              ${modelOpts(openaiModels, p.openai_model)}
+              ${modelOpts(openaiModels, p.model)}
             </select>
           </div>
         </div>
@@ -2137,6 +2226,20 @@ async function renderSettings() {
   `;
 }
 
+async function saveProviderApiKey(provider) {
+  const input = document.getElementById(`${provider}-key-input`);
+  const key = input.value.trim();
+  if (!key) return;
+  const res = await put('/api/provider/apikey', { provider, key });
+  if (res && res.ok) {
+    input.value = '';
+    const st = document.getElementById('provider-switch-status');
+    st.textContent = `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved.`;
+    st.style.color = 'var(--green)';
+    setTimeout(() => renderSettings(), 800);
+  }
+}
+
 async function switchProvider(provider) {
   const st = document.getElementById('provider-switch-status');
   st.textContent = 'Switching…';
@@ -2153,8 +2256,10 @@ async function switchProvider(provider) {
 }
 
 async function saveModel(provider, model) {
-  await post('/api/provider/model', { provider, model });
+  const res = await post('/api/provider/model', { provider, model });
+  if (res && res.ok) setTimeout(() => renderSettings(), 400);
 }
+
 
 // ── OpenAI connect modal ──────────────────────────────────────────────────────
 function showOpenAIConnectModal(tab) {
@@ -2576,6 +2681,170 @@ async function createNewSkill() {
     renderSkills();
   } else {
     errEl.textContent = res?.error || 'Failed to create skill.';
+    errEl.style.display = 'block';
+  }
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────
+const AGENT_PROVIDERS = ['anthropic', 'openai', 'nvidia'];
+
+async function renderAgents() {
+  const agents = await get('/api/agents');
+  if (!agents) return;
+
+  const el = document.getElementById('content');
+
+  const providerOpts = (selected) =>
+    ['', ...AGENT_PROVIDERS].map(p =>
+      `<option value="${p}" ${selected === p ? 'selected' : ''}>${p || 'Global default'}</option>`
+    ).join('');
+
+  const cards = agents.map((a, i) => `
+    <div class="skill-card" id="agent-card-${a.id}" style="animation-delay:${i * 40}ms">
+      <div class="skill-head" onclick="toggleAgent('${a.id}')">
+        <div class="skill-dot" style="background:var(--amber)"></div>
+        <div class="skill-info">
+          <div class="skill-name">${escHtml(a.id)}</div>
+          <div class="skill-desc">${a.provider ? escHtml(a.provider) + ' / ' : ''}${a.model ? escHtml(a.model) : '<span style="color:var(--border-2)">no model set</span>'}</div>
+        </div>
+        <span class="skill-chevron">›</span>
+      </div>
+      <div class="skill-body">
+        <div class="skill-field">
+          <div class="skill-field-label">Provider</div>
+          <select class="skill-input" id="agent-provider-${a.id}" style="cursor:pointer">
+            ${providerOpts(a.provider || '')}
+          </select>
+        </div>
+        <div class="skill-field">
+          <div class="skill-field-label">Model
+            <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--border-2);margin-left:6px">exact model ID — e.g. codex-mini-latest, claude-sonnet-4-6</span>
+          </div>
+          <input class="skill-input" id="agent-model-${a.id}" value="${escHtml(a.model || '')}" placeholder="uses global default if empty" />
+        </div>
+        <div class="skill-field" style="margin-bottom:0">
+          <div class="skill-field-label">System Prompt
+            <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--border-2);margin-left:6px">instructions for this agent — leave blank to use a generic role description</span>
+          </div>
+          <textarea class="skill-prompt" id="agent-prompt-${a.id}" placeholder="You are a focused coding agent…">${escHtml(a.systemPrompt || '')}</textarea>
+        </div>
+        <div class="skill-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveAgent('${a.id}')">Save</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteAgent('${a.id}')">Delete</button>
+          <span class="skill-save-status" id="agent-status-${a.id}"></span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="page-enter">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--muted)">Sub-agents spawned by the main agent for focused tasks. Each can use a different model and provider.</div>
+        <button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">+ New Agent</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">${cards || '<div class="empty-state"><div class="empty-state-title">NO AGENTS</div><div class="empty-state-sub">Create an agent to delegate coding, research, or other tasks.</div></div>'}</div>
+    </div>
+  `;
+}
+
+function toggleAgent(id) {
+  const card = document.getElementById(`agent-card-${id}`);
+  card.classList.toggle('skill-open');
+}
+
+async function saveAgent(id) {
+  const provider     = document.getElementById(`agent-provider-${id}`)?.value || undefined;
+  const model        = document.getElementById(`agent-model-${id}`)?.value?.trim() || undefined;
+  const systemPrompt = document.getElementById(`agent-prompt-${id}`)?.value || '';
+  const status       = document.getElementById(`agent-status-${id}`);
+
+  status.textContent = 'Saving…';
+  status.className   = 'skill-save-status';
+
+  const res = await put(`/api/agents/${id}`, { provider, model, systemPrompt });
+  if (res && res.id) {
+    status.textContent = '✓ Saved';
+    status.className   = 'skill-save-status ok';
+    const card = document.getElementById(`agent-card-${id}`);
+    const descEl = card?.querySelector('.skill-desc');
+    if (descEl) descEl.innerHTML = (provider ? escHtml(provider) + ' / ' : '') + (model ? escHtml(model) : '<span style="color:var(--border-2)">no model set</span>');
+    setTimeout(() => { if (status) { status.textContent = ''; status.className = 'skill-save-status'; } }, 3000);
+  } else {
+    status.textContent = '✗ Error';
+    status.className   = 'skill-save-status err';
+  }
+}
+
+async function deleteAgent(id) {
+  if (!confirm(`Delete agent "${id}"? This cannot be undone.`)) return;
+  const res = await del(`/api/agents/${id}`);
+  if (res && res.ok) document.getElementById(`agent-card-${id}`)?.remove();
+}
+
+function showNewAgentModal() {
+  const modal = document.createElement('div');
+  modal.className = 'skill-modal-bg';
+  modal.id = 'agent-new-modal';
+  modal.innerHTML = `
+    <div class="skill-modal" style="max-width:520px">
+      <div class="skill-modal-title">New Agent</div>
+      <div class="skill-field">
+        <div class="skill-field-label">Role ID <span style="color:var(--amber)">*</span>
+          <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--border-2);margin-left:6px">lowercase, hyphens ok — e.g. coder, researcher</span>
+        </div>
+        <input id="new-agent-id" class="skill-input" placeholder="e.g. coder" autofocus />
+      </div>
+      <div class="skill-field">
+        <div class="skill-field-label">Provider</div>
+        <select id="new-agent-provider" class="skill-input" style="cursor:pointer">
+          <option value="">Global default</option>
+          <option value="anthropic">anthropic</option>
+          <option value="openai">openai</option>
+          <option value="nvidia">nvidia</option>
+        </select>
+      </div>
+      <div class="skill-field">
+        <div class="skill-field-label">Model</div>
+        <input id="new-agent-model" class="skill-input" placeholder="e.g. codex-mini-latest (empty = global default)" />
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:18px">Edit the system prompt after creating the agent.</div>
+      <div id="new-agent-err" style="font-size:12px;color:var(--red);margin-bottom:12px;display:none"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="document.getElementById('agent-new-modal')?.remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="createNewAgent()">Create</button>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+  setTimeout(() => document.getElementById('new-agent-id')?.focus(), 50);
+  document.getElementById('new-agent-id').addEventListener('keydown', e => { if (e.key === 'Enter') createNewAgent(); });
+}
+
+async function createNewAgent() {
+  const id       = document.getElementById('new-agent-id')?.value?.trim().toLowerCase();
+  const provider = document.getElementById('new-agent-provider')?.value || undefined;
+  const model    = document.getElementById('new-agent-model')?.value?.trim() || undefined;
+  const errEl    = document.getElementById('new-agent-err');
+
+  if (!id) {
+    errEl.textContent = 'Role ID is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!/^[a-z0-9_-]+$/.test(id)) {
+    errEl.textContent = 'ID must be lowercase letters, numbers, or hyphens.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const res = await put(`/api/agents/${id}`, { provider, model, systemPrompt: '' });
+  if (res && res.id) {
+    document.getElementById('agent-new-modal')?.remove();
+    renderAgents();
+  } else {
+    errEl.textContent = res?.error || 'Failed to create agent.';
     errEl.style.display = 'block';
   }
 }

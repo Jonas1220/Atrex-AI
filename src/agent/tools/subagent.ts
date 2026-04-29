@@ -1,30 +1,55 @@
 // spawn_agent tool — lets the main agent delegate tasks to specialized sub-agents.
-// Sub-agents run as isolated Anthropic conversations with a focused system prompt.
-// They have access to plugin tools (search, APIs) but not memory/profile/schedule.
+// Sub-agents run as isolated conversations with a focused system prompt.
+// Each agent in agents/<role>.md can specify its own model and provider via frontmatter.
 import Anthropic from "@anthropic-ai/sdk";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { settings } from "../../config";
 import { log } from "../../logger";
 import { getPluginTools, getPluginHandlers } from "../../plugins/loader";
-import { createMessage } from "../anthropic";
+import { createMessage, getActiveModel, getActiveProvider, MessageOverrides } from "../providers";
 
-// Load a pre-defined agent persona from agents/<role>.md, if it exists
-function loadAgentPersona(role: string): string {
-  const slug = role.toLowerCase().replace(/\s+/g, "-");
-  const agentPath = join(process.cwd(), "agents", `${slug}.md`);
-  if (existsSync(agentPath)) {
-    return readFileSync(agentPath, "utf-8").trim();
-  }
-  return "";
+const AGENTS_DIR = join(process.cwd(), "agents");
+
+interface AgentPersona {
+  systemPrompt: string;
+  model?: string;
+  provider?: "anthropic" | "openai" | "nvidia";
 }
 
-// Returns the system prompt as two blocks so the stable persona prefix can be cached
-// across tool-loop iterations. Volatile timestamp sits after the cache breakpoint.
-function buildSystemPrompt(role: string, persona: string): Anthropic.TextBlockParam[] {
-  const identity = persona
-    ? persona
+// Parses optional YAML frontmatter (model, provider) from agents/<role>.md
+function loadAgentPersona(role: string): AgentPersona {
+  const slug = role.toLowerCase().replace(/\s+/g, "-");
+  const path = join(AGENTS_DIR, `${slug}.md`);
+  if (!existsSync(path)) return { systemPrompt: "" };
+
+  const raw = readFileSync(path, "utf-8");
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) return { systemPrompt: raw.trim() };
+
+  const front = match[1];
+  const body = match[2].trim();
+
+  const get = (key: string): string => {
+    const m = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return m ? m[1].trim() : "";
+  };
+
+  const model = get("model");
+  const providerRaw = get("provider");
+  const provider =
+    providerRaw === "openai" || providerRaw === "nvidia" || providerRaw === "anthropic"
+      ? providerRaw
+      : undefined;
+
+  return { systemPrompt: body, ...(model ? { model } : {}), ...(provider ? { provider } : {}) };
+}
+
+function buildSystemPrompt(role: string, persona: AgentPersona): Anthropic.TextBlockParam[] {
+  const identity = persona.systemPrompt
+    ? persona.systemPrompt
     : `You are a specialized AI agent acting as: ${role}.\n\nBe focused, direct, and thorough.`;
+
   const stable =
     `${identity}\n\n` +
     `You are a sub-agent. Complete the task you are given and return your findings clearly and concisely. ` +
@@ -47,22 +72,23 @@ function withCachedTools(tools: Anthropic.Tool[]): Anthropic.ToolUnion[] {
 async function runLoop(
   systemPrompt: Anthropic.TextBlockParam[],
   task: string,
+  overrides: MessageOverrides,
   tools: Anthropic.Tool[],
   handlers: Record<string, (input: Record<string, unknown>) => Promise<string>>
 ): Promise<string> {
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: task }];
   const cachedTools = withCachedTools(tools);
 
-  const baseRequest = {
-    model:      settings.subagent_model,
+  const baseParams: Anthropic.MessageCreateParamsNonStreaming = {
+    model:      overrides.model ?? getActiveModel(),
     max_tokens: settings.max_tokens,
     system:     systemPrompt,
-  } as const;
+    messages,
+  };
 
   let response: Anthropic.Message = await createMessage(
-    cachedTools.length > 0
-      ? { ...baseRequest, messages, tools: cachedTools }
-      : { ...baseRequest, messages }
+    cachedTools.length > 0 ? { ...baseParams, tools: cachedTools } : baseParams,
+    overrides
   );
 
   while (response.stop_reason === "tool_use") {
@@ -101,8 +127,9 @@ async function runLoop(
 
     response = await createMessage(
       cachedTools.length > 0
-        ? { ...baseRequest, messages, tools: cachedTools }
-        : { ...baseRequest, messages }
+        ? { ...baseParams, messages, tools: cachedTools }
+        : { ...baseParams, messages },
+      overrides
     );
   }
 
@@ -119,23 +146,23 @@ export const subagentTools: Anthropic.Tool[] = [
     name: "spawn_agent",
     description:
       "Spawn a specialized sub-agent to handle a focused task. " +
-      "The sub-agent runs independently with its own context, has access to all plugins (search, APIs, etc.), " +
-      "and returns its result as text. " +
-      "If a file agents/<role>.md exists, that persona is used. Otherwise the role description itself defines the agent. " +
-      "Use this to delegate tasks that benefit from specialized expertise (e.g. 'financial-expert', 'researcher', 'code-reviewer').",
+      "The sub-agent runs independently with its own context and returns its result as text. " +
+      "If agents/<role>.md exists, that persona is used — including its configured model and provider. " +
+      "Available roles: 'coder' (coding tasks), 'researcher' (web research). " +
+      "Or use any free-form role description for an ad-hoc agent.",
     input_schema: {
       type: "object" as const,
       properties: {
         role: {
           type: "string",
           description:
-            "The sub-agent's role or expertise. Use a slug like 'financial-expert' or 'researcher' to match agents/<role>.md, " +
-            "or any free-form description if no file exists.",
+            "The sub-agent role. Use a slug matching agents/<role>.md (e.g. 'coder', 'researcher') " +
+            "or any free-form description for an ad-hoc agent with no persona file.",
         },
         task: {
           type: "string",
           description:
-            "The full task description for the sub-agent. Be specific — it has no conversation history and no context beyond what you provide here.",
+            "The full task for the sub-agent. Be specific — it has no conversation history beyond what you provide here.",
         },
       },
       required: ["role", "task"],
@@ -151,15 +178,20 @@ export const subagentHandlers: Record<
     const role = input.role as string;
     const task = input.task as string;
 
-    log.subagent(`Spawning "${role}" (model: ${settings.subagent_model})`);
-
     const persona = loadAgentPersona(role);
+    const overrides: MessageOverrides = {
+      model:    persona.model    ?? getActiveModel(),
+      provider: persona.provider ?? getActiveProvider(),
+    };
+
+    log.subagent(`Spawning "${role}" (${overrides.provider}/${overrides.model})`);
+
     const systemPrompt = buildSystemPrompt(role, persona);
     const tools = getPluginTools();
     const handlers = getPluginHandlers();
 
     try {
-      const result = await runLoop(systemPrompt, task, tools, handlers);
+      const result = await runLoop(systemPrompt, task, overrides, tools, handlers);
       log.subagent(`"${role}" finished`);
       return `[Sub-agent: ${role}]\n\n${result}`;
     } catch (err) {

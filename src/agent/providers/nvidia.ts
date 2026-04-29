@@ -1,6 +1,6 @@
-// OpenAI provider adapter — accepts Anthropic-shaped request params and returns
-// an Anthropic-shaped Message, so agent.ts never needs to know which provider
-// is in use. All format translation happens here.
+// NVIDIA NIM provider adapter — accepts Anthropic-shaped request params and returns
+// an Anthropic-shaped Message. Uses the OpenAI-compatible NVIDIA API endpoint.
+// Kimi K2.5 (moonshotai/kimi-k2.5) supports extended thinking via chat_template_kwargs.
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type {
@@ -9,9 +9,17 @@ import type {
   ChatCompletionTool,
   ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
-import { settings } from "../config";
-import { log } from "../logger";
-import { getAccessToken } from "../openai/auth";
+import { settings } from "../../config";
+import { getActiveModel } from ".";
+import { log } from "../../logger";
+
+const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+
+function getNvidiaApiKey(): string {
+  const key = process.env.NVIDIA_API_KEY;
+  if (!key) throw new Error("NVIDIA_API_KEY is not set in environment");
+  return key;
+}
 
 // ── Request conversion: Anthropic → OpenAI ───────────────────────────────────
 
@@ -29,23 +37,22 @@ function convertMessages(
 
   for (const msg of msgs) {
     if (msg.role === "user") {
-      // Could be plain string or an array of blocks
       if (typeof msg.content === "string") {
         out.push({ role: "user", content: msg.content });
         continue;
       }
 
-      // Collect tool_results into separate "tool" messages; text + images into a user message
       let userText = "";
       const imageParts: Array<{ type: "image_url"; image_url: { url: string } }> = [];
       for (const block of msg.content) {
         if (block.type === "tool_result") {
-          const content = typeof block.content === "string"
-            ? block.content
-            : (block.content as Anthropic.TextBlockParam[])
-                .filter((b) => b.type === "text")
-                .map((b) => b.text)
-                .join("\n");
+          const content =
+            typeof block.content === "string"
+              ? block.content
+              : (block.content as Anthropic.TextBlockParam[])
+                  .filter((b) => b.type === "text")
+                  .map((b) => b.text)
+                  .join("\n");
           out.push({ role: "tool", tool_call_id: block.tool_use_id, content });
         } else if (block.type === "text") {
           userText += (userText ? "\n" : "") + block.text;
@@ -57,10 +64,8 @@ function convertMessages(
         }
       }
       if (imageParts.length > 0) {
-        // Build a multi-part content array for OpenAI vision
         const parts: Array<
-          { type: "text"; text: string } |
-          { type: "image_url"; image_url: { url: string } }
+          { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
         > = [
           ...imageParts,
           ...(userText ? [{ type: "text" as const, text: userText }] : []),
@@ -83,17 +88,17 @@ function convertMessages(
       );
 
       const tool_calls: ChatCompletionMessageToolCall[] = toolUseBlocks.map((b) => ({
-        id:   b.id,
+        id: b.id,
         type: "function" as const,
         function: {
-          name:      b.name,
+          name: b.name,
           arguments: JSON.stringify(b.input),
         },
       }));
 
       out.push({
-        role:      "assistant",
-        content:   textBlocks.map((b) => b.text).join("\n") || null,
+        role:    "assistant",
+        content: textBlocks.map((b) => b.text).join("\n") || null,
         ...(tool_calls.length > 0 ? { tool_calls } : {}),
       });
     }
@@ -108,24 +113,9 @@ function convertTools(tools: Anthropic.Tool[]): ChatCompletionTool[] {
     function: {
       name:        t.name,
       description: t.description ?? "",
-      // Strip Anthropic cache_control from the schema if present
       parameters:  t.input_schema as Record<string, unknown>,
     },
   }));
-}
-
-// Maps thinking budget to OpenAI reasoning_effort for o-series models.
-// GPT-4o/5 don't support this — it's silently omitted if the model isn't o-series.
-function reasoningEffort(
-  thinking: Anthropic.ThinkingConfigParam | undefined,
-  model: string
-): "low" | "medium" | "high" | undefined {
-  if (!thinking || thinking.type !== "enabled") return undefined;
-  if (!model.startsWith("o")) return undefined; // only for o1/o3/o4-mini etc.
-  const budget = thinking.budget_tokens;
-  if (budget <= 1024)  return "low";
-  if (budget <= 8192)  return "medium";
-  return "high";
 }
 
 // ── Response conversion: OpenAI → Anthropic ──────────────────────────────────
@@ -135,7 +125,7 @@ function convertResponse(
   originalModel: string
 ): Anthropic.Message {
   const choice = completion.choices[0];
-  const msg    = choice.message;
+  const msg = choice.message;
 
   const content: Array<Anthropic.TextBlock | Anthropic.ToolUseBlock> = [];
 
@@ -144,7 +134,6 @@ function convertResponse(
   }
 
   for (const tc of msg.tool_calls ?? []) {
-    // Only function tool calls have a .function property
     if (!("function" in tc)) continue;
     const fn = (tc as { id: string; function: { name: string; arguments: string } }).function;
     let input: unknown = {};
@@ -159,24 +148,24 @@ function convertResponse(
 
   const finishReason = choice.finish_reason;
   let stopReason: Anthropic.Message["stop_reason"];
-  if (finishReason === "tool_calls")    stopReason = "tool_use";
-  else if (finishReason === "length")   stopReason = "max_tokens";
-  else                                  stopReason = "end_turn";
+  if (finishReason === "tool_calls")  stopReason = "tool_use";
+  else if (finishReason === "length") stopReason = "max_tokens";
+  else                                stopReason = "end_turn";
 
   const usage = completion.usage;
 
   return {
-    id:           completion.id,
-    type:         "message",
-    role:         "assistant",
-    model:        originalModel,
+    id:            completion.id,
+    type:          "message",
+    role:          "assistant",
+    model:         originalModel,
     content,
-    stop_reason:  stopReason,
+    stop_reason:   stopReason,
     stop_sequence: null,
     usage: {
-      input_tokens:              usage?.prompt_tokens              ?? 0,
-      output_tokens:             usage?.completion_tokens          ?? 0,
-      cache_read_input_tokens:   null,
+      input_tokens:               usage?.prompt_tokens     ?? 0,
+      output_tokens:              usage?.completion_tokens ?? 0,
+      cache_read_input_tokens:    null,
       cache_creation_input_tokens: null,
     },
   };
@@ -184,40 +173,41 @@ function convertResponse(
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function createMessageOpenAI(
+export async function createMessageNvidia(
   params: Anthropic.MessageCreateParamsNonStreaming
 ): Promise<Anthropic.Message> {
-  const model = settings.openai_model;
-  const token = await getAccessToken();
+  const model = params.model || getActiveModel();
+  const apiKey = getNvidiaApiKey();
 
-  // The openai SDK treats the apiKey as the Bearer token value — works for both
-  // API keys (sk-...) and OAuth bearer tokens.
-  const client = new OpenAI({ apiKey: token });
+  const client = new OpenAI({ apiKey, baseURL: NVIDIA_BASE_URL });
 
   const systemBlocks = (params.system ?? []) as Anthropic.TextBlockParam[];
-  const systemStr    = systemText(systemBlocks);
-  const messages     = convertMessages(params.messages);
+  const systemStr = systemText(systemBlocks);
+  const messages = convertMessages(params.messages);
 
-  // Prepend system message
   const fullMessages: ChatCompletionMessageParam[] = [
     ...(systemStr ? [{ role: "system" as const, content: systemStr }] : []),
     ...messages,
   ];
 
   const tools = (params.tools ?? []) as Anthropic.Tool[];
-  const thinking = (params as { thinking?: Anthropic.ThinkingConfigParam }).thinking;
-  const effort = reasoningEffort(thinking, model);
 
-  const req: ChatCompletionCreateParamsNonStreaming = {
+  const thinking = (params as { thinking?: { type: string } }).thinking;
+  const enableThinking = thinking?.type === "enabled";
+
+  const req: ChatCompletionCreateParamsNonStreaming & { chat_template_kwargs?: { thinking: boolean } } = {
     model,
-    max_tokens:    params.max_tokens,
-    messages:      fullMessages,
+    max_tokens: params.max_tokens,
+    messages:   fullMessages,
     ...(tools.length > 0 ? { tools: convertTools(tools) } : {}),
-    ...(effort ? { reasoning_effort: effort } : {}),
+    chat_template_kwargs: { thinking: enableThinking },
     stream: false,
   };
 
-  log.agent(`[openai] ${model} — ${fullMessages.length} messages`);
-  const completion = await client.chat.completions.create(req);
+  log.agent(`[nvidia] ${model} — ${fullMessages.length} messages`);
+  const completion = await client.chat.completions.create(
+    req as ChatCompletionCreateParamsNonStreaming,
+    { headers: { Accept: "application/json" } }
+  );
   return convertResponse(completion, model);
 }

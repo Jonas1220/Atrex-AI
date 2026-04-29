@@ -5,9 +5,7 @@ import { log } from "../logger";
 import { appendMessage, getHistory } from "./context";
 import { getActiveSkill } from "./skills";
 import { getTools, getToolHandlers, ToolContext } from "./tools";
-import { autoSaveMemory } from "./tools/memory";
-import { isEscalated } from "./escalation";
-import { createMessage } from "./anthropic";
+import { createMessage, getActiveModel } from "./providers";
 import { LoopGuard } from "./loop-guard";
 import { getThinkingConfig, getThinkingLevel } from "./thinking";
 import { pruneHistory } from "./pruning";
@@ -35,7 +33,6 @@ function toolStatusText(name: string, input: Record<string, unknown>): string {
     case "run_code":                return "Running code...";
     case "add_memory":              return "Saving to memory...";
     case "update_long_term_memory": return "Updating memory...";
-    case "recall_memory":           return "Recalling memory...";
     case "update_soul":             return "Updating personality...";
     case "update_user_profile":     return "Updating your profile...";
     case "update_heartbeat":        return "Updating heartbeat...";
@@ -126,7 +123,7 @@ async function executeTools(
 }
 
 function activeChatModel(userId: number): string {
-  return getActiveSkill().model || (isEscalated(userId) ? settings.escalation_model : settings.model);
+  return getActiveSkill().model || getActiveModel();
 }
 
 export async function chat(
@@ -141,7 +138,7 @@ export async function chat(
     userId,
     userMessage,
     getThinkingLevel(userId),
-    isEscalated(userId)
+    false
   );
   const guard = new LoopGuard();
   const startedAt = Date.now();
@@ -275,11 +272,6 @@ export async function chat(
       appendMessage(userId, { role: "assistant", content: finalContent });
     }
 
-    // Auto-save a short-term memory of this exchange (runs in background, doesn't block response)
-    autoSaveMemory(userMessage, text).catch((err) =>
-      log.error(`Auto-save memory failed: ${err instanceof Error ? err.message : String(err)}`)
-    );
-
     let finalText: string;
     if (stoppedByGuard) {
       finalText = text || "Stopped — I was about to repeat the same tool call. Try rephrasing or use /clear.";
@@ -314,7 +306,7 @@ export async function chatOnce(
 ): Promise<string> {
   const ctx: ToolContext = { userId, updateStatus: onStatus };
 
-  const activeModel = getActiveSkill().model || settings.model;
+  const activeModel = getActiveSkill().model || getActiveModel();
   log.agent(`[${label}] Calling ${activeModel} (no context)`);
 
   const baseParams = (messages: Anthropic.MessageParam[]): Anthropic.MessageCreateParamsNonStreaming => ({

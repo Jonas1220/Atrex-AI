@@ -33,4 +33,4 @@ Items are free-form markdown. Each item needs:
 
 ## Items
 
-<!-- Add items below this line. Keep them short. -->
+- **Every day 03:00** — Review memory.md: remove outdated items, merge duplicates, tighten phrasing. Call update_long_term_memory with the cleaned version. No need to notify unless something notable was removed.

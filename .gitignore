@@ -14,6 +14,9 @@ config/whatsapp-auth/
 config/plugins.json
 config/schedules.json
 config/settings.json
+config/agents.md
+config/identity.md
+config/tools.md
 config/soul.md
 config/user.md
 config/heartbeat.md

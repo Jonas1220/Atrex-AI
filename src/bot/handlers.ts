@@ -3,7 +3,6 @@ import { Bot, Context, InputFile } from "grammy";
 import Anthropic from "@anthropic-ai/sdk";
 import { chat, chatOnce } from "../agent/agent";
 import { clearHistory } from "../agent/context";
-import { setEscalated, clearEscalation, ESCALATE_YES, ESCALATE_NO } from "../agent/escalation";
 import {
   getActiveSkill,
   getActiveSkillId,
@@ -27,8 +26,7 @@ import { getTrajectory } from "../agent/trajectory";
 import { getHistory } from "../agent/context";
 import { emit as emitHook } from "../agent/hooks";
 import { isOpenAIConnected } from "../openai/auth";
-import { setRuntimeProvider, getActiveProvider } from "../agent/anthropic";
-import { getWhatsAppSocket } from "../whatsapp/client";
+import { setRuntimeProvider, getActiveProvider, getActiveModel } from "../agent/providers";
 
 ensureMainSkill();
 
@@ -84,7 +82,6 @@ export function registerHandlers(bot: Bot): void {
   bot.command("clear", (ctx) => {
     if (!isAllowed(ctx.from!.id)) return;
     clearHistory(ctx.from!.id);
-    clearEscalation(ctx.from!.id);
     clearThinking(ctx.from!.id);
     ctx.reply("Conversation cleared.");
   });
@@ -182,7 +179,7 @@ export function registerHandlers(bot: Bot): void {
     const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
 
     const provider = getActiveProvider();
-    const model = provider === "openai" ? settings.openai_model : settings.model;
+    const model = provider === "openai" ? getActiveModel() : getActiveModel();
 
     const historyLen = getHistory(ctx.from!.id).length;
     const thinkingLevel = getThinkingLevel(ctx.from!.id);
@@ -192,16 +189,10 @@ export function registerHandlers(bot: Bot): void {
       .filter(([, p]) => p.enabled)
       .map(([name]) => name);
 
-    const messengers: string[] = ["Telegram"];
-    if (config.whatsappEnabled) {
-      const waSocket = getWhatsAppSocket();
-      messengers.push(`WhatsApp (${waSocket ? "connected" : "disconnected"})`);
-    }
-
     const lines = [
       `🟢 Online — uptime ${uptimeStr}`,
       ``,
-      `Messenger: ${messengers.join(", ")}`,
+      `Messenger: Telegram`,
       `Model: ${model} (${provider})`,
       thinkingLevel !== "off" ? `Thinking: ${thinkingLevel}` : null,
       ``,
@@ -278,7 +269,7 @@ export function registerHandlers(bot: Bot): void {
 
     if (!arg) {
       const active = getActiveProvider();
-      const model  = active === "openai" ? settings.openai_model : settings.model;
+      const model  = active === "openai" ? getActiveModel() : getActiveModel();
       const oaiOk  = isOpenAIConnected();
       ctx.reply(
         `Provider: ${active} (${model})\n` +
@@ -304,7 +295,7 @@ export function registerHandlers(bot: Bot): void {
     }
 
     setRuntimeProvider(arg);
-    const model = arg === "openai" ? settings.openai_model : settings.model;
+    const model = arg === "openai" ? getActiveModel() : getActiveModel();
     ctx.reply(`Provider switched to ${arg} (${model}).`);
   });
 
@@ -349,7 +340,7 @@ export function registerHandlers(bot: Bot): void {
         const poll = await pollRes.json() as { ok?: boolean; pending?: boolean; error?: string };
         if (poll.ok) {
           setRuntimeProvider("openai");
-          await ctx.reply(`OpenAI connected. Switched to provider: openai (${settings.openai_model}).`);
+          await ctx.reply(`OpenAI connected. Switched to provider: openai (${getActiveModel()}).`);
           return;
         }
         if (poll.error) {
@@ -565,17 +556,6 @@ export function registerHandlers(bot: Bot): void {
     const chatId = ctx.chat.id;
     const label = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
-
-    // Escalation buttons are handled directly — don't route through the agent.
-    if (label === ESCALATE_YES) {
-      setEscalated(userId);
-      await ctx.api.sendMessage(chatId, `Switched to ${settings.escalation_model}. Go ahead.`);
-      return;
-    }
-    if (label === ESCALATE_NO) {
-      await ctx.api.sendMessage(chatId, "Staying on current model.");
-      return;
-    }
 
     const status = await createStatusMessage(ctx, chatId);
     try {

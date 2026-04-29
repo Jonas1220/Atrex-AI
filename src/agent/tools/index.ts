@@ -13,7 +13,6 @@ import { codeTools, codeHandlers } from "./code";
 import { buttonTools, buttonHandlers } from "./buttons";
 import { reactionTools, reactionHandlers } from "./reactions";
 import { heartbeatTools, heartbeatHandlers } from "./heartbeat";
-import { escalationTools, escalationHandlers } from "../escalation";
 import { getPluginTools, getPluginHandlers } from "../../plugins/loader";
 import type { ToolHandler } from "./types";
 
@@ -33,7 +32,6 @@ const builtInTools: Anthropic.Tool[] = [
   ...buttonTools,
   ...reactionTools,
   ...heartbeatTools,
-  ...escalationTools,
 ];
 
 const builtInHandlers: Record<string, ToolHandler> = {
@@ -50,7 +48,6 @@ const builtInHandlers: Record<string, ToolHandler> = {
   ...buttonHandlers,
   ...reactionHandlers,
   ...heartbeatHandlers,
-  ...escalationHandlers,
 };
 
 // Called on every request — includes dynamically loaded plugin tools

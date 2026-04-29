@@ -9,9 +9,6 @@ dotenv.config();
 
 const settingsSchema = z.object({
   model: z.string().default("claude-sonnet-4-6"),
-  subagent_model: z.string().default("claude-haiku-4-5-20251001"),
-  escalation_model: z.string().default("claude-sonnet-4-6"),
-  ask_for_escalation: z.boolean().default(false),
   // Models tried in order if the primary fails with a 5xx/429 error.
   fallbacks: z.array(z.string()).default([]),
   // Heartbeat won't fire between quiet_hours_start and quiet_hours_end (24h, e.g. 23 and 7).
@@ -21,10 +18,8 @@ const settingsSchema = z.object({
   max_tokens: z.number().int().positive().default(1024),
   max_history: z.number().int().positive().default(50),
   timezone: z.string().default("UTC"),
-  // LLM provider. "anthropic" uses ANTHROPIC_API_KEY; "openai" uses OAuth bearer token.
-  provider: z.enum(["anthropic", "openai"]).default("anthropic"),
-  // Model name used when provider is "openai".
-  openai_model: z.string().default("gpt-4o"),
+  // LLM provider. "anthropic" uses ANTHROPIC_API_KEY; "openai" uses OAuth bearer token; "nvidia" uses NVIDIA_API_KEY.
+  provider: z.enum(["anthropic", "openai", "nvidia"]).default("anthropic"),
   // Tool-loop detection: warn after N identical (tool, input) calls, abort at M.
   tool_loop_warn: z.number().int().positive().default(3),
   tool_loop_max: z.number().int().positive().default(6),
@@ -67,8 +62,6 @@ export const settings = loadSettings();
 const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().default(""),
   ANTHROPIC_API_KEY:  z.string().default(""),
-  // Set to "true" to enable the WhatsApp bridge (Baileys). No token needed — scan a QR code on first start.
-  WHATSAPP_ENABLED: z.string().optional().transform((v) => v === "true"),
   ALLOWED_USER_IDS: z
     .string()
     .optional()
@@ -79,21 +72,20 @@ const envSchema = z.object({
 
 const env = envSchema.parse(process.env);
 
-const hasTelegram  = !!env.TELEGRAM_BOT_TOKEN && !!env.ANTHROPIC_API_KEY;
-const hasWhatsApp  = !!env.WHATSAPP_ENABLED   && !!env.ANTHROPIC_API_KEY;
+const hasTelegram = !!env.TELEGRAM_BOT_TOKEN && !!env.ANTHROPIC_API_KEY;
 
-if (!hasTelegram && !hasWhatsApp) {
+if (!hasTelegram) {
   console.warn(
-    "No messaging platform configured — running in setup mode.\n" +
-    "Set TELEGRAM_BOT_TOKEN or WHATSAPP_ENABLED=true (plus ANTHROPIC_API_KEY).\n" +
+    "Not configured — running in setup mode.\n" +
+    "Set TELEGRAM_BOT_TOKEN and ANTHROPIC_API_KEY.\n" +
     "Visit http://localhost:3000 to complete setup."
   );
 } else if (env.ALLOWED_USER_IDS.length === 0) {
   console.warn("WARNING: ALLOWED_USER_IDS is not set — anyone can talk to the agent.");
 }
 
-/** True when at least one messaging platform and the AI key are configured. */
-export const isConfigured = hasTelegram || hasWhatsApp;
+/** True when Telegram and the AI key are both configured. */
+export const isConfigured = hasTelegram;
 
 // Reads a file from the project root, returning "" if it doesn't exist
 function loadFile(filename: string): string {
@@ -185,13 +177,16 @@ export function getSystemPrompt(): Anthropic.TextBlockParam[] {
   });
   const dateLine = `Current date: ${now}, time: ${time}, timezone: ${settings.timezone}`;
 
+  const identity  = loadFile("config/identity.md");
   const soul      = loadFile("config/soul.md");
+  const agents    = loadFile("config/agents.md");
+  const tools     = loadFile("config/tools.md");
   const user      = loadFile("config/user.md");
   const memory    = getMemory();
   const skills    = getSkillsSection();
   const heartbeat = getHeartbeatSection();
 
-  const stable = [soul, user, memory, skills, heartbeat]
+  const stable = [identity, soul, agents, tools, user, memory, skills, heartbeat]
     .filter(Boolean)
     .join("\n\n---\n\n");
 
@@ -204,8 +199,7 @@ export function getSystemPrompt(): Anthropic.TextBlockParam[] {
 }
 
 export const config = {
-  telegramToken:    env.TELEGRAM_BOT_TOKEN,
-  anthropicKey:     env.ANTHROPIC_API_KEY,
-  whatsappEnabled:  env.WHATSAPP_ENABLED ?? false,
-  allowedUserIds:   env.ALLOWED_USER_IDS,
+  telegramToken:  env.TELEGRAM_BOT_TOKEN,
+  anthropicKey:   env.ANTHROPIC_API_KEY,
+  allowedUserIds: env.ALLOWED_USER_IDS,
 };

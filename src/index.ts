@@ -37,14 +37,6 @@ if (!isConfigured) {
     });
   }
 
-  // ── WhatsApp ────────────────────────────────────────────────────────────────
-  if (config.whatsappEnabled) {
-    const { startWhatsApp } = require("./whatsapp/client");
-    startWhatsApp().catch((err: unknown) => {
-      log.error(`Failed to start WhatsApp: ${err instanceof Error ? err.message : String(err)}`);
-    });
-  }
-
   // ── Shared services ─────────────────────────────────────────────────────────
   loadAllEnabled();
   startScheduler(bot);

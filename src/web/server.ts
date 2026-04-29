@@ -13,7 +13,7 @@ import { createOpenAIRouter } from "../openai/oauth";
 import { isOpenAIConnected } from "../openai/auth";
 import { createAnthropicRouter } from "../anthropic/oauth";
 import { isAnthropicOAuthConnected } from "../anthropic/auth";
-import { setRuntimeProvider, getActiveProvider } from "../agent/anthropic";
+import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel } from "../agent/providers";
 import {
   listSkills,
   loadSkill,
@@ -98,7 +98,6 @@ function ensureConfigDefaults(): void {
   if (!existsSync(cfgPath("settings.json"))) {
     writeFileSync(cfgPath("settings.json"), JSON.stringify({
       model:          "claude-sonnet-4-6",
-      subagent_model: "claude-haiku-4-5-20251001",
       max_tokens:     1024,
       max_history:    50,
       timezone:       "UTC",
@@ -149,23 +148,32 @@ ensureMainSkill();
 // ── Setup endpoints (always accessible — registered before auth middleware) ──
 app.get("/setup/status", (_req, res) => {
   res.json({
-    needsSetup: !process.env.TELEGRAM_BOT_TOKEN || (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected()),
-    telegram:   !!process.env.TELEGRAM_BOT_TOKEN,
-    anthropic:  !!process.env.ANTHROPIC_API_KEY,
-    openai:     isOpenAIConnected(),
+    needsSetup: !process.env.TELEGRAM_BOT_TOKEN ||
+      (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !process.env.NVIDIA_API_KEY),
+    telegram:  !!process.env.TELEGRAM_BOT_TOKEN,
+    anthropic: !!process.env.ANTHROPIC_API_KEY,
+    openai:    isOpenAIConnected(),
+    nvidia:    !!process.env.NVIDIA_API_KEY,
   });
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, nvidiaKey, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
-  if (telegramToken)              updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
-  if (anthropicKey)               updates["ANTHROPIC_API_KEY"]  = anthropicKey;
-  if (allowedUserIds !== undefined) updates["ALLOWED_USER_IDS"] = allowedUserIds;
-  if (adminToken)                 updates["WEB_ADMIN_TOKEN"]    = adminToken;
+  if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
+  if (anthropicKey)                 updates["ANTHROPIC_API_KEY"]  = anthropicKey;
+  if (nvidiaKey)                    updates["NVIDIA_API_KEY"]      = nvidiaKey;
+  if (allowedUserIds !== undefined) updates["ALLOWED_USER_IDS"]   = allowedUserIds;
+  if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
     updateEnvFile(updates);
+    if (provider && ["anthropic", "openai", "nvidia"].includes(provider)) {
+      let cfg: Record<string, unknown> = {};
+      try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
+      cfg.provider = provider;
+      writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
+    }
     log.info("Core credentials saved via setup wizard.");
     res.json({ ok: true });
   } catch (err) {
@@ -223,20 +231,20 @@ app.get("/api/provider", (_req, res) => {
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
   res.json({
-    active:            getActiveProvider(),
-    default:           cfg.provider ?? "anthropic",
-    model:             cfg.model ?? "claude-sonnet-4-6",
-    openai_model:      cfg.openai_model ?? "gpt-4o",
-    anthropicReady:    !!process.env.ANTHROPIC_API_KEY,
-    anthropicOAuth:    isAnthropicOAuthConnected(),
-    openaiReady:       isOpenAIConnected(),
+    active:         getActiveProvider(),
+    default:        cfg.provider ?? "anthropic",
+    model:          getActiveModel(),
+    anthropicReady: !!process.env.ANTHROPIC_API_KEY,
+    anthropicOAuth: isAnthropicOAuthConnected(),
+    openaiReady:    isOpenAIConnected(),
+    nvidiaReady:    !!process.env.NVIDIA_API_KEY,
   });
 });
 
 app.post("/api/provider/switch", (req, res) => {
   const { provider } = req.body as { provider?: string };
-  if (provider !== "anthropic" && provider !== "openai") {
-    res.status(400).json({ error: "provider must be 'anthropic' or 'openai'" });
+  if (provider !== "anthropic" && provider !== "openai" && provider !== "nvidia") {
+    res.status(400).json({ error: "provider must be 'anthropic', 'openai', or 'nvidia'" });
     return;
   }
   if (provider === "openai" && !isOpenAIConnected()) {
@@ -247,11 +255,13 @@ app.post("/api/provider/switch", (req, res) => {
     res.status(400).json({ error: "Anthropic has no API key or OAuth token." });
     return;
   }
+  if (provider === "nvidia" && !process.env.NVIDIA_API_KEY) {
+    res.status(400).json({ error: "NVIDIA_API_KEY is not set." });
+    return;
+  }
 
-  // Apply live in this process
   setRuntimeProvider(provider);
 
-  // Persist as default in settings.json
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
   cfg.provider = provider;
@@ -264,13 +274,35 @@ app.post("/api/provider/switch", (req, res) => {
 app.post("/api/provider/model", (req, res) => {
   const { provider, model } = req.body as { provider?: string; model?: string };
   if (!provider || !model) { res.status(400).json({ error: "provider and model required" }); return; }
+  if (!["anthropic", "openai", "nvidia"].includes(provider)) {
+    res.status(400).json({ error: "unknown provider" }); return;
+  }
+
+  // Apply live — no restart needed
+  setRuntimeModel(model);
+  setRuntimeProvider(provider as "anthropic" | "openai" | "nvidia");
+
+  // Persist to settings.json
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
-  if (provider === "anthropic") cfg.model = model;
-  else if (provider === "openai") cfg.openai_model = model;
-  else { res.status(400).json({ error: "unknown provider" }); return; }
+  cfg.model = model;
+  cfg.provider = provider;
   writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
-  log.info(`${provider} model set to ${model} via web admin.`);
+
+  log.info(`Provider → ${provider}, model → ${model} (via web admin)`);
+  res.json({ ok: true, active: provider, model });
+});
+
+app.put("/api/provider/apikey", (req, res) => {
+  const { provider, key } = req.body as { provider?: string; key?: string };
+  if (!provider || !key) { res.status(400).json({ error: "provider and key required" }); return; }
+  let envKey: string;
+  if (provider === "anthropic")      envKey = "ANTHROPIC_API_KEY";
+  else if (provider === "nvidia")    envKey = "NVIDIA_API_KEY";
+  else { res.status(400).json({ error: "API keys can only be set for anthropic and nvidia" }); return; }
+  updateEnvFile({ [envKey]: key });
+  process.env[envKey] = key;
+  log.info(`${envKey} updated via web admin.`);
   res.json({ ok: true });
 });
 
@@ -346,6 +378,28 @@ app.put("/api/settings", (req, res) => {
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: "Failed to write settings.json" });
+  }
+});
+
+app.patch("/api/settings", (req, res) => {
+  const PATCHABLE = new Set([
+    "model",
+    "max_tokens", "max_history", "timezone",
+    "quiet_hours_start", "quiet_hours_end",
+    "tool_loop_warn", "tool_loop_max",
+    "prune_tool_results_after", "compaction_threshold",
+  ]);
+  try {
+    let cfg: Record<string, unknown> = {};
+    try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
+    for (const [key, value] of Object.entries(req.body as Record<string, unknown>)) {
+      if (PATCHABLE.has(key)) cfg[key] = value;
+    }
+    writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
+    log.info(`settings.json patched: ${Object.keys(req.body).join(", ")}`);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: "Failed to patch settings.json" });
   }
 });
 
@@ -474,6 +528,86 @@ app.post("/api/skills/:id/activate", (req, res) => {
   res.json({ ok: true, activeId: id });
 });
 
+
+// ── Agents ───────────────────────────────────────────────────────────────────
+const AGENTS_DIR_PATH = join(ROOT, "agents");
+
+interface AgentDef {
+  id: string;
+  model?: string;
+  provider?: string;
+  systemPrompt: string;
+}
+
+function parseAgentFile(raw: string, id: string): AgentDef {
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) return { id, systemPrompt: raw.trim() };
+  const front = match[1];
+  const body = match[2].trim();
+  const get = (key: string): string => {
+    const m = front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return m ? m[1].trim() : "";
+  };
+  return {
+    id,
+    systemPrompt: body,
+    ...(get("model")    ? { model:    get("model")    } : {}),
+    ...(get("provider") ? { provider: get("provider") } : {}),
+  };
+}
+
+function serializeAgentFile(agent: AgentDef): string {
+  const lines: string[] = ["---"];
+  if (agent.model)    lines.push(`model: ${agent.model}`);
+  if (agent.provider) lines.push(`provider: ${agent.provider}`);
+  lines.push("---\n");
+  return lines.join("\n") + (agent.systemPrompt || "");
+}
+
+function listAgents(): AgentDef[] {
+  try {
+    mkdirSync(AGENTS_DIR_PATH, { recursive: true });
+    return readdirSync(AGENTS_DIR_PATH)
+      .filter((f) => f.endsWith(".md"))
+      .sort()
+      .map((f) => parseAgentFile(readText(join(AGENTS_DIR_PATH, f)), f.replace(".md", "")));
+  } catch { return []; }
+}
+
+app.get("/api/agents", (_req, res) => {
+  res.json(listAgents());
+});
+
+app.put("/api/agents/:id", (req, res) => {
+  const { id } = req.params;
+  if (!/^[a-z0-9_-]+$/.test(id)) {
+    res.status(400).json({ error: "Invalid agent id — use lowercase letters, numbers, hyphens" });
+    return;
+  }
+  const { model, provider, systemPrompt } = req.body as Partial<AgentDef>;
+  mkdirSync(AGENTS_DIR_PATH, { recursive: true });
+  const agent: AgentDef = {
+    id,
+    model:        model        || undefined,
+    provider:     provider     || undefined,
+    systemPrompt: systemPrompt || "",
+  };
+  writeText(join(AGENTS_DIR_PATH, `${id}.md`), serializeAgentFile(agent));
+  log.info(`Agent '${id}' saved via web admin`);
+  res.json(agent);
+});
+
+app.delete("/api/agents/:id", (req, res) => {
+  const { id } = req.params;
+  if (!/^[a-z0-9_-]+$/.test(id)) {
+    res.status(400).json({ error: "Invalid agent id" }); return;
+  }
+  const path = join(AGENTS_DIR_PATH, `${id}.md`);
+  if (!existsSync(path)) { res.status(404).json({ error: "Agent not found" }); return; }
+  rmSync(path);
+  log.info(`Agent '${id}' deleted via web admin`);
+  res.json({ ok: true });
+});
 
 // ── Secrets ───────────────────────────────────────────────────────────────────
 app.get("/api/secrets", (_req, res) => {

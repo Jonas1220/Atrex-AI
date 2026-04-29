@@ -7,7 +7,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { settings } from "../config";
 import { getHistory } from "./context";
-import { anthropic } from "./anthropic";
+import { anthropic } from "./providers";
 import { log } from "../logger";
 
 type Message = Anthropic.MessageParam;
