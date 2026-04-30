@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ── Atrex AI CLI ──────────────────────────────────────────────────────────────
 # Usage: atrex <command>
-# Commands: start, stop, restart, status, logs, update, open, setup, help
+# Commands: start, stop, restart, status, logs, update, open, setup, token, uninstall, help
 
 CONFIG_DIR="$HOME/.atrex"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -202,15 +202,30 @@ cmd_update() {
 
   cd "$INSTALL_DIR"
 
-  info "Pulling latest changes…"
-  git pull origin main
+  # .git is removed on install — fetch a fresh copy and replace dist/
+  local REPO_URL="https://github.com/Jonas1220/atrex-ai.git"
+  local TMP_DIR
+  TMP_DIR=$(mktemp -d)
+
+  info "Downloading latest release…"
+  git clone --depth 1 "$REPO_URL" "$TMP_DIR" --quiet
 
   info "Installing dependencies…"
+  cp "$TMP_DIR/package.json" "$TMP_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
   npm install --silent
 
   info "Building…"
+  cp -r "$TMP_DIR/src" "$INSTALL_DIR/"
   npm run build --silent
 
+  # Copy updated plugins and config templates (don't overwrite live configs)
+  cp -r "$TMP_DIR/plugins" "$INSTALL_DIR/"
+  for src in "$TMP_DIR"/config/*.initial.md; do
+    [ -f "$src" ] || continue
+    cp "$src" "$INSTALL_DIR/config/"
+  done
+
+  rm -rf "$TMP_DIR"
   ok "Update complete"
 
   if is_running; then
@@ -219,6 +234,56 @@ cmd_update() {
   else
     info "Run ${BOLD}atrex start${RESET} to start the updated agent."
   fi
+}
+
+cmd_uninstall() {
+  echo ""
+  echo -e "  ${BOLD}${RED}Uninstall Atrex AI${RESET}"
+  echo ""
+  echo -e "  This will permanently delete:"
+  echo -e "    ${DIM}• $INSTALL_DIR${RESET}  (install directory)"
+  echo -e "    ${DIM}• $CONFIG_DIR${RESET}  (CLI config)"
+  echo -e "    ${DIM}• atrex CLI command${RESET}"
+  echo ""
+  echo -n "  Are you sure? [y/N] "
+  read -r CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "  Aborted."
+    exit 0
+  fi
+  echo ""
+
+  # Stop and remove from PM2
+  if [ "$HAS_PM2" = true ] && pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
+    info "Stopping and removing from PM2…"
+    pm2 delete "$APP_NAME" --silent 2>/dev/null || true
+    pm2 save --force --silent 2>/dev/null || true
+    ok "Removed from PM2"
+  elif is_running_pid; then
+    info "Stopping agent…"
+    kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    ok "Stopped"
+  fi
+
+  # Remove CLI symlink
+  info "Removing atrex CLI…"
+  npm unlink --global atrex 2>/dev/null || \
+    npm rm --global atrex 2>/dev/null || \
+    sudo npm unlink --global atrex 2>/dev/null || true
+  ok "CLI removed"
+
+  # Remove install directory
+  info "Removing install directory…"
+  rm -rf "$INSTALL_DIR"
+  ok "Removed $INSTALL_DIR"
+
+  # Remove CLI config
+  rm -rf "$CONFIG_DIR"
+  ok "Removed $CONFIG_DIR"
+
+  echo ""
+  echo -e "  ${GREEN}${BOLD}Atrex AI uninstalled.${RESET}"
+  echo ""
 }
 
 cmd_open() {
@@ -280,6 +345,7 @@ cmd_help() {
   echo -e "    ${AMBER}open${RESET}       Open the web dashboard in your browser"
   echo -e "    ${AMBER}setup${RESET}      Start the agent and open the onboarding wizard"
   echo -e "    ${AMBER}token${RESET}      Show the web dashboard admin token"
+  echo -e "    ${AMBER}uninstall${RESET}  Remove Atrex AI and all its files"
   echo -e "    ${AMBER}help${RESET}       Show this message"
   echo ""
   echo -e "  ${DIM}Install dir: $INSTALL_DIR${RESET}"
@@ -298,7 +364,8 @@ case "$COMMAND" in
   update)  cmd_update ;;
   open)    cmd_open ;;
   setup)   cmd_setup ;;
-  token)   cmd_token ;;
+  token)     cmd_token ;;
+  uninstall) cmd_uninstall ;;
   help|--help|-h) cmd_help ;;
   *)
     echo -e "  ${RED}Unknown command:${RESET} $COMMAND"
