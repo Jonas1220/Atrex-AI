@@ -139,6 +139,12 @@ function extractTextToolCall(text: string): { name: string; input: Record<string
       const input = typeof raw === "string" ? JSON.parse(raw) : raw;
       return { name: obj.function.name, input };
     }
+    // {"name":"...","parameters":{...}} — bare format, no type wrapper
+    if (typeof obj.name === "string" && obj.parameters !== undefined) {
+      const raw = obj.parameters;
+      const input = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return { name: obj.name, input };
+    }
   } catch {}
   return null;
 }
