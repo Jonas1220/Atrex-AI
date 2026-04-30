@@ -15,6 +15,7 @@ Reference for connected services and API keys. Update this when a new tool is co
 - **Reactions** — send emoji reactions to messages
 - **Skills** — `use_skill` to switch active skill
 - **Subagent** — `spawn_agent` for isolated one-shot queries
+- **Codex CLI** — `run_codex` delegates coding tasks to the Codex CLI (non-interactive, full-auto mode). Requires `OPENAI_API_KEY` in secrets. 10-minute timeout.
 
 ## Plugins
 

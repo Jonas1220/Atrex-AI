@@ -8,6 +8,7 @@ import { settings } from "../../config";
 import { log } from "../../logger";
 import { getPluginTools, getPluginHandlers } from "../../plugins/loader";
 import { createMessage, getActiveModel, getActiveProvider, MessageOverrides } from "../providers";
+import { codexTools, codexHandlers } from "./codex";
 
 const AGENTS_DIR = join(process.cwd(), "agents");
 
@@ -187,8 +188,14 @@ export const subagentHandlers: Record<
     log.subagent(`Spawning "${role}" (${overrides.provider}/${overrides.model})`);
 
     const systemPrompt = buildSystemPrompt(role, persona);
-    const tools = getPluginTools();
-    const handlers = getPluginHandlers();
+    const tools = [...getPluginTools(), ...codexTools];
+    const pluginHandlerMap = getPluginHandlers();
+    const handlers: Record<string, (input: Record<string, unknown>) => Promise<string>> = {
+      ...pluginHandlerMap,
+    };
+    for (const [name, fn] of Object.entries(codexHandlers)) {
+      handlers[name] = (input) => fn(input, { userId: 0 });
+    }
 
     try {
       const result = await runLoop(systemPrompt, task, overrides, tools, handlers);

@@ -37,6 +37,7 @@ function toolStatusText(name: string, input: Record<string, unknown>): string {
     case "update_user_profile":     return "Updating your profile...";
     case "update_heartbeat":        return "Updating heartbeat...";
     case "spawn_agent":             return `Consulting ${input.role ?? "agent"}...`;
+    case "run_codex":               return `Codex: ${String(input.task ?? "").slice(0, 60)}...`;
     case "create_file":             return "Creating file...";
     case "send_buttons":            return "Preparing options...";
     case "send_reaction":           return "";
