@@ -110,6 +110,20 @@ ok "Repository cloned"
 
 cd "$INSTALL_DIR"
 
+# Remove .git so the install directory is not itself a git repo
+rm -rf .git
+ok "Removed .git (not a git repo)"
+
+# Seed config files: copy *.initial.md → *.md if not already present
+for src in config/*.initial.md; do
+  [ -f "$src" ] || continue
+  dest="${src/.initial.md/.md}"
+  if [ ! -f "$dest" ]; then
+    cp "$src" "$dest"
+  fi
+done
+ok "Config files seeded from templates"
+
 # ── Write port to .env ────────────────────────────────────────────────────────
 ENV_FILE="$INSTALL_DIR/.env"
 if [ ! -f "$ENV_FILE" ] && [ -f "$INSTALL_DIR/.env.example" ]; then

@@ -10,7 +10,6 @@ import { filesystemTools, filesystemHandlers } from "./filesystem";
 import { shellTools, shellHandlers } from "./shell";
 import { fetchTools, fetchHandlers } from "./fetch";
 import { codeTools, codeHandlers } from "./code";
-import { buttonTools, buttonHandlers } from "./buttons";
 import { reactionTools, reactionHandlers } from "./reactions";
 import { heartbeatTools, heartbeatHandlers } from "./heartbeat";
 import { codexTools, codexHandlers } from "./codex";
@@ -30,7 +29,6 @@ const builtInTools: Anthropic.Tool[] = [
   ...shellTools,
   ...fetchTools,
   ...codeTools,
-  ...buttonTools,
   ...reactionTools,
   ...heartbeatTools,
   ...codexTools,
@@ -47,7 +45,6 @@ const builtInHandlers: Record<string, ToolHandler> = {
   ...shellHandlers,
   ...fetchHandlers,
   ...codeHandlers,
-  ...buttonHandlers,
   ...reactionHandlers,
   ...heartbeatHandlers,
   ...codexHandlers,

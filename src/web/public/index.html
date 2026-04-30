@@ -1108,12 +1108,11 @@
       <div class="wizard-sub">Here's what was configured during setup.</div>
       <ul class="wizard-done-list" id="wizard-done-list"></ul>
       <div class="wizard-restart" id="wizard-restart-note" style="display:none">
-        Restart the agent for your core credentials to take effect:<br>
-        <code style="color:var(--text)">npm start</code>
+        <span id="wizard-restart-msg">Restarting agent…</span>
       </div>
       <div class="wizard-nav" style="border:none;padding:0;margin:0">
         <span></span>
-        <button class="btn btn-primary" onclick="wizardOpenDashboard()">Open Dashboard →</button>
+        <button class="btn btn-primary" id="wizard-dashboard-btn" onclick="wizardOpenDashboard()" style="display:none">Open Dashboard →</button>
       </div>
     </div>
 
@@ -1388,17 +1387,47 @@ async function wizardFinish(skip) {
     </li>
   `).join('');
 
-  if (_wizardCoreWritten) {
-    document.getElementById('wizard-restart-note').style.display = 'block';
-  }
-
   wizardGo(3);
+
+  if (_wizardCoreWritten) {
+    const note = document.getElementById('wizard-restart-note');
+    const msg  = document.getElementById('wizard-restart-msg');
+    note.style.display = 'block';
+    msg.textContent = 'Restarting agent…';
+    // Trigger server restart, then poll until it's back up
+    try {
+      await fetch('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    } catch {}
+    await wizardPollRestart();
+  } else {
+    document.getElementById('wizard-dashboard-btn').style.display = '';
+  }
+}
+
+async function wizardPollRestart() {
+  const msg = document.getElementById('wizard-restart-msg');
+  // Give process manager a moment to restart the server
+  await new Promise(r => setTimeout(r, 1500));
+  let attempts = 0;
+  while (attempts < 30) {
+    await new Promise(r => setTimeout(r, 1000));
+    attempts++;
+    try {
+      const r = await fetch('/setup/status');
+      if (r.ok) {
+        msg.textContent = 'Agent restarted.';
+        document.getElementById('wizard-dashboard-btn').style.display = '';
+        return;
+      }
+    } catch {}
+    msg.textContent = `Waiting for restart… (${attempts}s)`;
+  }
+  msg.textContent = 'Restart timed out — start the agent manually with: atrex start';
+  document.getElementById('wizard-dashboard-btn').style.display = '';
 }
 
 async function wizardOpenDashboard() {
   document.getElementById('wizard-overlay').classList.add('hidden');
-  // Re-run init — if core was written but not yet active (requires restart),
-  // the status endpoint still reports needsSetup:true, so go straight to app.
   const data = await get('/api/auth-required');
   if (data && data.required && !token) {
     showAuth();
@@ -2080,7 +2109,13 @@ async function deleteSecretKey(key) {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 async function renderSettings() {
-  const [data, prov] = await Promise.all([get('/api/settings'), get('/api/provider')]);
+  const [data, prov, anthropicList, nvidiaList, openaiList] = await Promise.all([
+    get('/api/settings'),
+    get('/api/provider'),
+    get('/api/provider/models?provider=anthropic').catch(() => null),
+    get('/api/provider/models?provider=nvidia').catch(() => null),
+    get('/api/provider/models?provider=openai').catch(() => null),
+  ]);
   if (!data) return;
 
   const p = prov || {
@@ -2088,26 +2123,29 @@ async function renderSettings() {
     anthropicReady: false, anthropicOAuth: false, openaiReady: false, nvidiaReady: false,
   };
 
-  const anthropicModels = [
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fast & cheap' },
-    { id: 'claude-sonnet-4-6',         label: 'Sonnet 4.6 — balanced' },
-    { id: 'claude-opus-4-7',           label: 'Opus 4.7 — most capable' },
-  ];
-  const openaiModels = [
-    { id: 'gpt-4o',      label: 'GPT-4o — flagship' },
-    { id: 'gpt-4o-mini', label: 'GPT-4o mini — fast & cheap' },
-    { id: 'o3',          label: 'o3 — advanced reasoning' },
-    { id: 'o4-mini',     label: 'o4-mini — fast reasoning' },
-  ];
-  const nvidiaModels = [
-    { id: 'moonshotai/kimi-k2.5',     label: 'Kimi K2.5 — extended thinking' },
-    { id: 'meta/llama-4-maverick-17b-128e-instruct', label: 'Llama 4 Maverick 17B' },
-    { id: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', label: 'Nemotron Ultra 253B' },
+  // Fallback lists used when API fetch fails or key isn't set yet
+  const fallbackAnthropic = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'];
+  const fallbackOpenAI    = ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'];
+  const fallbackNvidia    = [
+    'meta/llama-4-maverick-17b-128e-instruct',
+    'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   ];
 
-  const modelOpts = (models, current) => models.map(m =>
-    `<option value="${m.id}" ${m.id === current ? 'selected' : ''}>${escHtml(m.label)}</option>`
-  ).join('');
+  const anthropicModels = (anthropicList?.models?.length ? anthropicList.models : fallbackAnthropic)
+    .map(id => ({ id, label: id }));
+  const openaiModels    = (openaiList?.models?.length ? openaiList.models : fallbackOpenAI)
+    .map(id => ({ id, label: id }));
+  const nvidiaModels    = (nvidiaList?.models?.length ? nvidiaList.models : fallbackNvidia)
+    .map(id => ({ id, label: id }));
+
+  const modelOpts = (models, current) => {
+    const opts = models.map(m =>
+      `<option value="${m.id}" ${m.id === current ? 'selected' : ''}>${escHtml(m.label)}</option>`
+    ).join('');
+    // If current model isn't in the list, add it at top so it stays selected
+    const has = models.some(m => m.id === current);
+    return has ? opts : `<option value="${escHtml(current)}" selected>${escHtml(current)}</option>` + opts;
+  };
 
   const provCard = (id, label, subtitle, badges, actions, clickable) => `
     <div id="provider-card-${id}"

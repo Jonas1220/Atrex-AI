@@ -39,7 +39,6 @@ function toolStatusText(name: string, input: Record<string, unknown>): string {
     case "spawn_agent":             return `Consulting ${input.role ?? "agent"}...`;
     case "run_codex":               return `Codex: ${String(input.task ?? "").slice(0, 60)}...`;
     case "create_file":             return "Creating file...";
-    case "send_buttons":            return "Preparing options...";
     case "send_reaction":           return "";
     case "use_skill":               return `Switching to ${input.skill_id ?? "skill"}...`;
     default: {
@@ -172,14 +171,10 @@ export async function chat(
     let stepStart = Date.now();
     let response = await createMessage(callParams(activeModel));
     let toolsRan = false;
-    let buttonsSent = false;
     let stoppedByGuard = false;
 
     while (response.stop_reason === "tool_use") {
       toolsRan = true;
-      if (response.content.some((b) => b.type === "tool_use" && (b as Anthropic.ToolUseBlock).name === "send_buttons")) {
-        buttonsSent = true;
-      }
 
       const assistantContent = response.content
         .filter((block): block is Anthropic.TextBlock | Anthropic.ToolUseBlock =>
@@ -276,7 +271,7 @@ export async function chat(
     let finalText: string;
     if (stoppedByGuard) {
       finalText = text || "Stopped — I was about to repeat the same tool call. Try rephrasing or use /clear.";
-    } else if (!text && toolsRan && !buttonsSent) {
+    } else if (!text && toolsRan) {
       finalText = "Done.";
     } else {
       finalText = text;
@@ -322,14 +317,10 @@ export async function chatOnce(
 
   // Minimal tool loop — tools still work but nothing is persisted to main history
   let toolsRan = false;
-  let buttonsSent = false;
   const guard = new LoopGuard();
 
   while (response.stop_reason === "tool_use") {
     toolsRan = true;
-    if (response.content.some((b) => b.type === "tool_use" && (b as Anthropic.ToolUseBlock).name === "send_buttons")) {
-      buttonsSent = true;
-    }
 
     if (guard.observe(response.content)) {
       log.warn(`[${label}] Tool-loop detected — aborting`);
@@ -359,6 +350,6 @@ export async function chatOnce(
     .map((block) => block.text)
     .join("\n");
 
-  if (!text && toolsRan && !buttonsSent) return "Done.";
+  if (!text && toolsRan) return "Done.";
   return text;
 }

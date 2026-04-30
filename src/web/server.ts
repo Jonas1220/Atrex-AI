@@ -2,7 +2,7 @@
 // Generates a random WEB_ADMIN_TOKEN on first run and saves it to .env.
 import express from "express";
 import { randomBytes } from "crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, copyFileSync } from "fs";
 import { join } from "path";
 import { setSecret } from "../plugins/secrets";
 import { getRegistry, setPluginEnabled, unregisterPlugin } from "../plugins/registry";
@@ -105,6 +105,19 @@ function ensureConfigDefaults(): void {
     log.info("Created default config/settings.json");
   }
 
+  // Seed *.initial.md → *.md if the live file doesn't exist yet
+  try {
+    const configDir = join(ROOT, "config");
+    for (const f of readdirSync(configDir)) {
+      if (!f.endsWith(".initial.md")) continue;
+      const dest = join(configDir, f.replace(".initial.md", ".md"));
+      if (!existsSync(dest)) {
+        copyFileSync(join(configDir, f), dest);
+        log.info(`Seeded ${f.replace(".initial.md", ".md")} from template`);
+      }
+    }
+  } catch {}
+
   if (!existsSync(cfgPath("plugins.json"))) {
     writeFileSync(cfgPath("plugins.json"), JSON.stringify({
       google: {
@@ -169,9 +182,17 @@ app.put("/setup/core", (req, res) => {
   try {
     updateEnvFile(updates);
     if (provider && ["anthropic", "openai", "nvidia"].includes(provider)) {
+      const defaultModels: Record<string, string> = {
+        anthropic: "claude-sonnet-4-6",
+        openai:    "gpt-4o",
+        nvidia:    "meta/llama-4-maverick-17b-128e-instruct",
+      };
       let cfg: Record<string, unknown> = {};
       try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
       cfg.provider = provider;
+      if (!cfg.model || cfg.model === "claude-sonnet-4-6" && provider !== "anthropic") {
+        cfg.model = defaultModels[provider];
+      }
       writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
     }
     log.info("Core credentials saved via setup wizard.");
@@ -721,6 +742,55 @@ app.get("/api/logs/:filename", (req, res) => {
     return;
   }
   res.json({ content: readText(join(ROOT, "logs", filename)) });
+});
+
+// ── Live model list from provider APIs ───────────────────────────────────────
+app.get("/api/provider/models", async (req, res) => {
+  const provider = req.query.provider as string;
+  try {
+    if (provider === "anthropic") {
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (!key) { res.json({ models: [] }); return; }
+      const r = await fetch("https://api.anthropic.com/v1/models", {
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      });
+      const data = await r.json() as { data?: { id: string }[] };
+      const models = (data.data ?? []).map((m: { id: string }) => m.id);
+      res.json({ models });
+    } else if (provider === "nvidia") {
+      const key = process.env.NVIDIA_API_KEY;
+      if (!key) { res.json({ models: [] }); return; }
+      const r = await fetch("https://integrate.api.nvidia.com/v1/models", {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      const data = await r.json() as { data?: { id: string }[] };
+      const models = (data.data ?? []).map((m: { id: string }) => m.id);
+      res.json({ models });
+    } else if (provider === "openai") {
+      const { isOpenAIConnected: oaiConnected, getAccessToken } = await import("../openai/auth");
+      if (!oaiConnected()) { res.json({ models: [] }); return; }
+      const OpenAI = (await import("openai")).default;
+      const token  = await getAccessToken();
+      const client = new OpenAI({ apiKey: token });
+      const list   = await client.models.list();
+      const models = list.data
+        .map((m: { id: string }) => m.id)
+        .filter((id: string) => id.startsWith("gpt-") || /^o\d/.test(id) || id.startsWith("codex"))
+        .sort();
+      res.json({ models });
+    } else {
+      res.status(400).json({ error: "unknown provider" });
+    }
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Restart ────────────────────────────────────────────────────────────────────
+app.post("/api/restart", (_req, res) => {
+  res.json({ ok: true });
+  log.info("Restart requested via web admin — exiting for process manager to respawn.");
+  setTimeout(() => process.exit(0), 300);
 });
 
 // ── OAuth routes ──────────────────────────────────────────────────────────────

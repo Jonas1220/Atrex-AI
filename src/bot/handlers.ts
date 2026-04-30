@@ -540,37 +540,6 @@ export function registerHandlers(bot: Bot): void {
     }
   });
 
-  // Inline button presses — route the label back to the agent as a user message
-  bot.on("callback_query:data", async (ctx) => {
-    const userId = ctx.from.id;
-    if (!isAllowed(userId)) {
-      await ctx.answerCallbackQuery();
-      return;
-    }
-    // Inline-mode callbacks can arrive without an attached chat — nothing to reply to.
-    if (!ctx.chat) {
-      await ctx.answerCallbackQuery();
-      return;
-    }
-
-    const chatId = ctx.chat.id;
-    const label = ctx.callbackQuery.data;
-    await ctx.answerCallbackQuery();
-
-    const status = await createStatusMessage(ctx, chatId);
-    try {
-      log.chat("in", userId, `[button] ${label}`);
-      const response = await chat(userId, label, status.update);
-      await status.remove();
-      log.chat("out", userId, response);
-      if (response) await sendLong(ctx, response);
-    } catch (err) {
-      await status.remove();
-      log.error(`Button handler error: ${err instanceof Error ? err.message : String(err)}`);
-      await ctx.reply("Something went wrong. Try again.");
-    }
-  });
-
   bot.on("message:text", async (ctx) => {
     if (!isAllowed(ctx.from!.id)) return;
     const chatId = ctx.chat.id;
