@@ -6,7 +6,7 @@ import { Bot } from "grammy";
 import { chatOnce } from "../agent/agent";
 import { config, settings } from "../config";
 import { log } from "../logger";
-import { ensureHeartbeat, getDueItems } from "../agent/tools/heartbeat";
+import { ensureHeartbeat, getDueItems, getLastPulse, saveLastPulse } from "../agent/tools/heartbeat";
 
 const PULSE_CRON = "*/30 * * * *";
 
@@ -68,8 +68,11 @@ export function startHeartbeat(bot: Bot): void {
         }
       }
       // Parse due items in code — no AI needed. Only call Claude if something is actually due.
-      const dueItems = getDueItems(settings.timezone);
+      // Pass the last successful pulse time so missed items are caught up on restart.
+      const lastPulse = getLastPulse() ?? undefined;
+      const dueItems = getDueItems(settings.timezone, lastPulse);
       if (dueItems.length === 0) {
+        saveLastPulse();
         log.info("Heartbeat: nothing due, skipping pulse.");
         return;
       }
@@ -81,10 +84,11 @@ export function startHeartbeat(bot: Bot): void {
         const trimmed = response.trim();
         if (!trimmed || trimmed.toUpperCase() === "NONE") {
           log.info("Heartbeat: nothing due.");
-          return;
+        } else {
+          await bot.api.sendMessage(userId, trimmed);
+          log.success(`Heartbeat fired → user ${userId}`);
         }
-        await bot.api.sendMessage(userId, trimmed);
-        log.success(`Heartbeat fired → user ${userId}`);
+        saveLastPulse();
       } catch (err) {
         log.error(`Heartbeat pulse failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {

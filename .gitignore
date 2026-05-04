@@ -28,6 +28,7 @@ config/runtime.json
 logs/
 memory/
 output/
+config/last-heartbeat.txt
 
 # ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store

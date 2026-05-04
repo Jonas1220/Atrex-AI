@@ -6,8 +6,9 @@ import { join } from "path";
 import { log } from "../../logger";
 import type { ToolHandler } from "./types";
 
-const HEARTBEAT_PATH  = join(process.cwd(), "config/heartbeat.md");
-const TEMPLATE_PATH   = join(process.cwd(), "config/heartbeat.initial.md");
+const HEARTBEAT_PATH   = join(process.cwd(), "config/heartbeat.md");
+const TEMPLATE_PATH    = join(process.cwd(), "config/heartbeat.initial.md");
+const LAST_PULSE_PATH  = join(process.cwd(), "config/last-heartbeat.txt");
 
 // Minimal fallback if the template file is also missing (e.g. corrupt install).
 const FALLBACK_CONTENT = `# Heartbeat
@@ -41,18 +42,18 @@ export function hasHeartbeatItems(): boolean {
   return stripped.length > 0;
 }
 
-// Parses heartbeat.md and returns items that are due right now (within the last 2 hours).
+// Parses heartbeat.md and returns items that are due since `since` (defaults to 2h ago).
 // Supports two formats written by the agent:
 //   One-shot:   **2026-05-04 11:00** — description
 //   Recurring:  **Every Monday 09:00** — description  (or "Every day HH:MM")
 // No AI involved — pure date arithmetic in the user's timezone.
-export function getDueItems(timezone: string): string[] {
+export function getDueItems(timezone: string, since?: Date): string[] {
   const content = readHeartbeat();
   const itemsMatch = content.match(/##\s+Items\s*\n([\s\S]*)$/i);
   if (!itemsMatch) return [];
 
   const now = new Date();
-  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+  const sinceDate = since ?? new Date(now.getTime() - 2 * 60 * 60 * 1000);
 
   // Format a Date to "YYYY-MM-DD HH:MM" in the given timezone (for string comparison).
   function toTZString(d: Date): string {
@@ -62,12 +63,8 @@ export function getDueItems(timezone: string): string[] {
   }
 
   const nowStr = toTZString(now);
-  const twoHAgoStr = toTZString(twoHoursAgo);
-
-  // Today's weekday name (lowercase) and date string in the user's timezone.
-  const todayWeekday = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "long" })
-    .format(now).toLowerCase();
-  const todayDate = now.toLocaleDateString("en-CA", { timeZone: timezone });
+  const sinceStr = toTZString(sinceDate);
+  const sinceDateStr = sinceStr.slice(0, 10); // "YYYY-MM-DD"
 
   const due: string[] = [];
 
@@ -79,25 +76,48 @@ export function getDueItems(timezone: string): string[] {
     const oneshot = trimmed.match(/\*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\*\*/);
     if (oneshot) {
       const t = oneshot[1];
-      if (t >= twoHAgoStr && t <= nowStr) due.push(trimmed);
+      if (t > sinceStr && t <= nowStr) due.push(trimmed);
       continue;
     }
 
     // Recurring: **Every <day|weekday> HH:MM**
+    // Walk back up to 8 days to catch any missed occurrence since `sinceDate`.
     const recurring = trimmed.match(/\*\*Every\s+(\w+)\s+(\d{2}:\d{2})\*\*/i);
     if (recurring) {
       const [, period, time] = recurring;
-      const itemFull = `${todayDate} ${time}`;
-      const matchesDay =
-        period.toLowerCase() === "day" ||
-        period.toLowerCase() === todayWeekday;
-      if (matchesDay && itemFull >= twoHAgoStr && itemFull <= nowStr) {
-        due.push(trimmed);
+      for (let daysBack = 0; daysBack < 8; daysBack++) {
+        const d = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
+        const dateStr = d.toLocaleDateString("en-CA", { timeZone: timezone });
+        // Stop once we've gone past the since boundary
+        if (dateStr < sinceDateStr) break;
+        const weekday = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "long" })
+          .format(d).toLowerCase();
+        const matchesDay = period.toLowerCase() === "day" || period.toLowerCase() === weekday;
+        if (!matchesDay) continue;
+        const occStr = `${dateStr} ${time}`;
+        if (occStr > sinceStr && occStr <= nowStr) {
+          due.push(trimmed);
+          break; // fire each recurring item at most once per catch-up
+        }
       }
     }
   }
 
   return due;
+}
+
+export function getLastPulse(): Date | null {
+  try {
+    const ts = readFileSync(LAST_PULSE_PATH, "utf-8").trim();
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastPulse(): void {
+  writeFileSync(LAST_PULSE_PATH, new Date().toISOString(), "utf-8");
 }
 
 // On first run, copy heartbeat.initial.md → heartbeat.md so the user can edit the
