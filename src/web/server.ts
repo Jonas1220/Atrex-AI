@@ -30,6 +30,21 @@ const ROOT = process.cwd();
 const cfgPath = (f: string) => join(ROOT, "config", f);
 const memPath = (f: string) => join(ROOT, "config", f);
 
+function getOllamaBaseUrl(): string {
+  return (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434").replace(/\/$/, "");
+}
+
+async function isOllamaReachable(): Promise<boolean> {
+  try {
+    const r = await fetch(`${getOllamaBaseUrl()}/api/tags`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
@@ -159,33 +174,39 @@ ensureConfigDefaults();
 ensureMainSkill();
 
 // ── Setup endpoints (always accessible — registered before auth middleware) ──
-app.get("/setup/status", (_req, res) => {
+app.get("/setup/status", async (_req, res) => {
+  const ollamaOk = await isOllamaReachable();
+  let cfgProvider = "anthropic";
+  try { cfgProvider = (JSON.parse(readText(cfgPath("settings.json"))) as Record<string, string>).provider ?? "anthropic"; } catch {}
   res.json({
     needsSetup: !process.env.TELEGRAM_BOT_TOKEN ||
-      (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !process.env.NVIDIA_API_KEY),
+      (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !process.env.NVIDIA_API_KEY && cfgProvider !== "ollama"),
     telegram:  !!process.env.TELEGRAM_BOT_TOKEN,
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai:    isOpenAIConnected(),
     nvidia:    !!process.env.NVIDIA_API_KEY,
+    ollama:    ollamaOk,
   });
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, nvidiaKey, provider, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, nvidiaKey, ollamaUrl, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
   if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
   if (anthropicKey)                 updates["ANTHROPIC_API_KEY"]  = anthropicKey;
   if (nvidiaKey)                    updates["NVIDIA_API_KEY"]      = nvidiaKey;
+  if (ollamaUrl)                    updates["OLLAMA_BASE_URL"]     = ollamaUrl;
   if (allowedUserIds !== undefined) updates["ALLOWED_USER_IDS"]   = allowedUserIds;
   if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
     updateEnvFile(updates);
-    if (provider && ["anthropic", "openai", "nvidia"].includes(provider)) {
+    if (provider && ["anthropic", "openai", "nvidia", "ollama"].includes(provider)) {
       const defaultModels: Record<string, string> = {
         anthropic: "claude-sonnet-4-6",
         openai:    "gpt-4o",
         nvidia:    "meta/llama-4-maverick-17b-128e-instruct",
+        ollama:    "llama3.2",
       };
       let cfg: Record<string, unknown> = {};
       try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -248,9 +269,10 @@ app.get("/api/status", (_req, res) => {
 
 // ── Provider ─────────────────────────────────────────────────────────────────
 
-app.get("/api/provider", (_req, res) => {
+app.get("/api/provider", async (_req, res) => {
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
+  const ollamaOk = await isOllamaReachable();
   res.json({
     active:         getActiveProvider(),
     default:        cfg.provider ?? "anthropic",
@@ -259,13 +281,15 @@ app.get("/api/provider", (_req, res) => {
     anthropicOAuth: isAnthropicOAuthConnected(),
     openaiReady:    isOpenAIConnected(),
     nvidiaReady:    !!process.env.NVIDIA_API_KEY,
+    ollamaReady:    ollamaOk,
+    ollamaBaseUrl:  getOllamaBaseUrl(),
   });
 });
 
-app.post("/api/provider/switch", (req, res) => {
+app.post("/api/provider/switch", async (req, res) => {
   const { provider } = req.body as { provider?: string };
-  if (provider !== "anthropic" && provider !== "openai" && provider !== "nvidia") {
-    res.status(400).json({ error: "provider must be 'anthropic', 'openai', or 'nvidia'" });
+  if (!["anthropic", "openai", "nvidia", "ollama"].includes(provider ?? "")) {
+    res.status(400).json({ error: "provider must be 'anthropic', 'openai', 'nvidia', or 'ollama'" });
     return;
   }
   if (provider === "openai" && !isOpenAIConnected()) {
@@ -280,8 +304,12 @@ app.post("/api/provider/switch", (req, res) => {
     res.status(400).json({ error: "NVIDIA_API_KEY is not set." });
     return;
   }
+  if (provider === "ollama" && !(await isOllamaReachable())) {
+    res.status(400).json({ error: `Ollama is not reachable at ${getOllamaBaseUrl()}. Make sure it's running.` });
+    return;
+  }
 
-  setRuntimeProvider(provider);
+  setRuntimeProvider(provider as "anthropic" | "openai" | "nvidia" | "ollama");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -295,13 +323,13 @@ app.post("/api/provider/switch", (req, res) => {
 app.post("/api/provider/model", (req, res) => {
   const { provider, model } = req.body as { provider?: string; model?: string };
   if (!provider || !model) { res.status(400).json({ error: "provider and model required" }); return; }
-  if (!["anthropic", "openai", "nvidia"].includes(provider)) {
+  if (!["anthropic", "openai", "nvidia", "ollama"].includes(provider)) {
     res.status(400).json({ error: "unknown provider" }); return;
   }
 
   // Apply live — no restart needed
   setRuntimeModel(model);
-  setRuntimeProvider(provider as "anthropic" | "openai" | "nvidia");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "nvidia" | "ollama");
 
   // Persist to settings.json
   let cfg: Record<string, unknown> = {};
@@ -324,6 +352,16 @@ app.put("/api/provider/apikey", (req, res) => {
   updateEnvFile({ [envKey]: key });
   process.env[envKey] = key;
   log.info(`${envKey} updated via web admin.`);
+  res.json({ ok: true });
+});
+
+app.put("/api/provider/baseurl", (req, res) => {
+  const { provider, url } = req.body as { provider?: string; url?: string };
+  if (!provider || !url) { res.status(400).json({ error: "provider and url required" }); return; }
+  if (provider !== "ollama") { res.status(400).json({ error: "Only ollama supports base URL config" }); return; }
+  updateEnvFile({ OLLAMA_BASE_URL: url });
+  process.env.OLLAMA_BASE_URL = url;
+  log.info(`OLLAMA_BASE_URL updated to ${url} via web admin.`);
   res.json({ ok: true });
 });
 
@@ -777,6 +815,13 @@ app.get("/api/provider/models", async (req, res) => {
         .map((m: { id: string }) => m.id)
         .filter((id: string) => id.startsWith("gpt-") || /^o\d/.test(id) || id.startsWith("codex"))
         .sort();
+      res.json({ models });
+    } else if (provider === "ollama") {
+      const baseUrl = getOllamaBaseUrl();
+      const r = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+      if (!r.ok) { res.json({ models: [] }); return; }
+      const data = await r.json() as { models?: { name: string }[] };
+      const models = (data.models ?? []).map((m: { name: string }) => m.name);
       res.json({ models });
     } else {
       res.status(400).json({ error: "unknown provider" });

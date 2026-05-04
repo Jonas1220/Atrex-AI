@@ -18,8 +18,9 @@ const settingsSchema = z.object({
   max_tokens: z.number().int().positive().default(1024),
   max_history: z.number().int().positive().default(50),
   timezone: z.string().default("UTC"),
-  // LLM provider. "anthropic" uses ANTHROPIC_API_KEY; "openai" uses OAuth bearer token; "nvidia" uses NVIDIA_API_KEY.
-  provider: z.enum(["anthropic", "openai", "nvidia"]).default("anthropic"),
+  // LLM provider. "anthropic" uses ANTHROPIC_API_KEY; "openai" uses OAuth bearer token;
+  // "nvidia" uses NVIDIA_API_KEY; "ollama" uses OLLAMA_BASE_URL (no key required).
+  provider: z.enum(["anthropic", "openai", "nvidia", "ollama"]).default("anthropic"),
   // Tool-loop detection: warn after N identical (tool, input) calls, abort at M.
   tool_loop_warn: z.number().int().positive().default(3),
   tool_loop_max: z.number().int().positive().default(6),
@@ -72,12 +73,13 @@ const envSchema = z.object({
 
 const env = envSchema.parse(process.env);
 
-const hasTelegram = !!env.TELEGRAM_BOT_TOKEN && !!env.ANTHROPIC_API_KEY;
+const hasLLM = !!env.ANTHROPIC_API_KEY || settings.provider === "ollama";
+const hasTelegram = !!env.TELEGRAM_BOT_TOKEN && hasLLM;
 
 if (!hasTelegram) {
   console.warn(
     "Not configured — running in setup mode.\n" +
-    "Set TELEGRAM_BOT_TOKEN and ANTHROPIC_API_KEY.\n" +
+    "Set TELEGRAM_BOT_TOKEN and configure an AI provider.\n" +
     "Visit http://localhost:3000 to complete setup."
   );
 } else if (env.ALLOWED_USER_IDS.length === 0) {

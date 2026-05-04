@@ -920,18 +920,22 @@
 
       <div class="wizard-field">
         <div class="wizard-label">AI Provider <span class="wizard-req">*</span></div>
-        <div style="display:flex;gap:8px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
           <button id="wprov-anthropic" onclick="selectWizardProvider('anthropic')"
-            style="flex:1;padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--amber);background:var(--amber-dim);color:var(--amber);cursor:pointer;transition:all 0.15s">
+            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--amber);background:var(--amber-dim);color:var(--amber);cursor:pointer;transition:all 0.15s">
             Anthropic
           </button>
           <button id="wprov-nvidia" onclick="selectWizardProvider('nvidia')"
-            style="flex:1;padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
             NVIDIA
           </button>
           <button id="wprov-openai" onclick="selectWizardProvider('openai')"
-            style="flex:1;padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
             OpenAI
+          </button>
+          <button id="wprov-ollama" onclick="selectWizardProvider('ollama')"
+            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            Ollama
           </button>
         </div>
         <div id="wprov-fields-anthropic">
@@ -952,6 +956,14 @@
           <div class="wizard-hint" style="margin-bottom:0;padding:12px;background:var(--surface-2);border-radius:6px;border:1px solid var(--border)">
             OpenAI uses OAuth — no API key needed here.<br>
             Connect your ChatGPT account from the Settings page after setup.
+          </div>
+        </div>
+        <div id="wprov-fields-ollama" style="display:none">
+          <input id="w-ollama-url" class="wizard-input" type="text"
+                 placeholder="http://localhost:11434" value="http://localhost:11434" autocomplete="off" />
+          <div class="wizard-hint" style="margin-top:8px">
+            Base URL for your Ollama server. <strong>No API key needed.</strong>
+            Make sure Ollama is running before continuing.
           </div>
         </div>
       </div>
@@ -1285,7 +1297,7 @@ let _wizardProvider = 'anthropic';
 
 function selectWizardProvider(p) {
   _wizardProvider = p;
-  ['anthropic', 'nvidia', 'openai'].forEach(id => {
+  ['anthropic', 'nvidia', 'openai', 'ollama'].forEach(id => {
     const btn = document.getElementById(`wprov-${id}`);
     const fields = document.getElementById(`wprov-fields-${id}`);
     const active = id === p;
@@ -1302,14 +1314,14 @@ async function wizardSaveCore() {
   const adm   = document.getElementById('w-admin-token').value.trim();
   const errEl = document.getElementById('w-core-err');
 
-  const anth  = document.getElementById('w-anth-key')?.value.trim() || '';
-  const nvidia = document.getElementById('w-nvidia-key')?.value.trim() || '';
+  const anth      = document.getElementById('w-anth-key')?.value.trim() || '';
+  const nvidia    = document.getElementById('w-nvidia-key')?.value.trim() || '';
+  const ollamaUrl = document.getElementById('w-ollama-url')?.value.trim() || 'http://localhost:11434';
 
-  const hasKey = _wizardProvider === 'openai' || anth || nvidia;
+  const noKeyNeeded = _wizardProvider === 'openai' || _wizardProvider === 'ollama';
+  const hasKey = noKeyNeeded || anth || nvidia;
   if (!tg || !hasKey) {
-    errEl.textContent = _wizardProvider === 'openai'
-      ? 'Telegram Bot Token is required.'
-      : `Telegram Bot Token and ${_wizardProvider === 'nvidia' ? 'NVIDIA' : 'Anthropic'} API Key are required.`;
+    errEl.textContent = `Telegram Bot Token and ${_wizardProvider === 'nvidia' ? 'NVIDIA' : 'Anthropic'} API Key are required.`;
     errEl.classList.remove('hidden');
     return;
   }
@@ -1320,8 +1332,9 @@ async function wizardSaveCore() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       telegramToken: tg,
-      ...(anth   ? { anthropicKey: anth }  : {}),
-      ...(nvidia  ? { nvidiaKey: nvidia }   : {}),
+      ...(anth      ? { anthropicKey: anth }        : {}),
+      ...(nvidia    ? { nvidiaKey: nvidia }          : {}),
+      ...(_wizardProvider === 'ollama' ? { ollamaUrl } : {}),
       provider: _wizardProvider,
       allowedUserIds: ids,
       adminToken: adm,
@@ -2109,18 +2122,20 @@ async function deleteSecretKey(key) {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 async function renderSettings() {
-  const [data, prov, anthropicList, nvidiaList, openaiList] = await Promise.all([
+  const [data, prov, anthropicList, nvidiaList, openaiList, ollamaList] = await Promise.all([
     get('/api/settings'),
     get('/api/provider'),
     get('/api/provider/models?provider=anthropic').catch(() => null),
     get('/api/provider/models?provider=nvidia').catch(() => null),
     get('/api/provider/models?provider=openai').catch(() => null),
+    get('/api/provider/models?provider=ollama').catch(() => null),
   ]);
   if (!data) return;
 
   const p = prov || {
     active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
     anthropicReady: false, anthropicOAuth: false, openaiReady: false, nvidiaReady: false,
+    ollamaReady: false, ollamaBaseUrl: 'http://localhost:11434',
   };
 
   // Fallback lists used when API fetch fails or key isn't set yet
@@ -2130,12 +2145,15 @@ async function renderSettings() {
     'meta/llama-4-maverick-17b-128e-instruct',
     'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   ];
+  const fallbackOllama    = ['llama3.2', 'llama3.1', 'mistral', 'codellama'];
 
   const anthropicModels = (anthropicList?.models?.length ? anthropicList.models : fallbackAnthropic)
     .map(id => ({ id, label: id }));
   const openaiModels    = (openaiList?.models?.length ? openaiList.models : fallbackOpenAI)
     .map(id => ({ id, label: id }));
   const nvidiaModels    = (nvidiaList?.models?.length ? nvidiaList.models : fallbackNvidia)
+    .map(id => ({ id, label: id }));
+  const ollamaModels    = (ollamaList?.models?.length ? ollamaList.models : fallbackOllama)
     .map(id => ({ id, label: id }));
 
   const modelOpts = (models, current) => {
@@ -2194,6 +2212,20 @@ async function renderSettings() {
       <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('nvidia')">Save</button>
     </div>`;
 
+  const ollamaClickable = p.ollamaReady;
+  const ollamaBadges = p.ollamaReady
+    ? `<span class="badge badge-ok">Connected</span>`
+    : `<span class="badge badge-warn">Not reachable</span>`;
+  const ollamaActions = `
+    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="ollama-url-input" type="text" placeholder="${escHtml(p.ollamaBaseUrl || 'http://localhost:11434')}"
+             value="${escHtml(p.ollamaBaseUrl || 'http://localhost:11434')}"
+             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
+             autocomplete="off" />
+      <button class="btn btn-secondary btn-sm" onclick="saveOllamaUrl()">Save</button>
+    </div>`;
+
   const openaiClickable = p.openaiReady;
   const openaiActions = p.openaiReady
     ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -2213,16 +2245,17 @@ async function renderSettings() {
           Click a provider to make it active. API keys and model selection are saved immediately.
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
           ${provCard('anthropic', 'Anthropic', 'Claude models', anthropicBadges, anthropicActions, true)}
           ${provCard('nvidia', 'NVIDIA NIM', 'Kimi K2.5 and other models', nvidiaBadges, nvidiaActions, nvidiaClickable)}
           ${provCard('openai', 'OpenAI', 'GPT models via ChatGPT account', '', openaiActions, openaiClickable)}
+          ${provCard('ollama', 'Ollama', 'Local models — no API key needed', ollamaBadges, ollamaActions, ollamaClickable)}
         </div>
 
         <div id="provider-switch-status" style="font-size:12px;color:var(--muted);min-height:18px"></div>
 
         <!-- Provider model selectors -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
           <div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Anthropic Model</div>
             <select id="anthropic-model-sel" class="skill-input" style="width:100%;cursor:pointer"
@@ -2242,6 +2275,13 @@ async function renderSettings() {
             <select id="openai-model-sel" class="skill-input" style="width:100%;cursor:pointer"
                     onchange="saveModel('openai', this.value)">
               ${modelOpts(openaiModels, p.model)}
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Ollama Model</div>
+            <select id="ollama-model-sel" class="skill-input" style="width:100%;cursor:pointer"
+                    onchange="saveModel('ollama', this.value)">
+              ${modelOpts(ollamaModels, p.model)}
             </select>
           </div>
         </div>
@@ -2273,6 +2313,19 @@ async function saveProviderApiKey(provider) {
     input.value = '';
     const st = document.getElementById('provider-switch-status');
     st.textContent = `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved.`;
+    st.style.color = 'var(--green)';
+    setTimeout(() => renderSettings(), 800);
+  }
+}
+
+async function saveOllamaUrl() {
+  const input = document.getElementById('ollama-url-input');
+  const url = input?.value.trim();
+  if (!url) return;
+  const res = await put('/api/provider/baseurl', { provider: 'ollama', url });
+  if (res && res.ok) {
+    const st = document.getElementById('provider-switch-status');
+    st.textContent = 'Ollama URL saved.';
     st.style.color = 'var(--green)';
     setTimeout(() => renderSettings(), 800);
   }

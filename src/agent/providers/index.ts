@@ -6,19 +6,20 @@ import { settings } from "../../config";
 import { createMessageAnthropic } from "./anthropic";
 import { createMessageOpenAI } from "./openai";
 import { createMessageNvidia } from "./nvidia";
+import { createMessageOllama } from "./ollama";
 
 export { anthropic } from "./anthropic";
 
 // Runtime overrides — applied immediately without a restart.
 // null = fall back to the value loaded from settings.json at startup.
-let runtimeProvider: "anthropic" | "openai" | "nvidia" | null = null;
+let runtimeProvider: "anthropic" | "openai" | "nvidia" | "ollama" | null = null;
 let runtimeModel: string | null = null;
 
-export function setRuntimeProvider(p: "anthropic" | "openai" | "nvidia" | null): void {
+export function setRuntimeProvider(p: "anthropic" | "openai" | "nvidia" | "ollama" | null): void {
   runtimeProvider = p;
 }
 
-export function getActiveProvider(): "anthropic" | "openai" | "nvidia" {
+export function getActiveProvider(): "anthropic" | "openai" | "nvidia" | "ollama" {
   return runtimeProvider ?? settings.provider;
 }
 
@@ -32,7 +33,7 @@ export function getActiveModel(): string {
 
 export interface MessageOverrides {
   model?: string;
-  provider?: "anthropic" | "openai" | "nvidia";
+  provider?: "anthropic" | "openai" | "nvidia" | "ollama";
 }
 
 export async function createMessage(
@@ -41,7 +42,8 @@ export async function createMessage(
 ): Promise<Anthropic.Message> {
   const provider = overrides?.provider ?? getActiveProvider();
   const resolved = overrides?.model ? { ...params, model: overrides.model } : params;
-  if (provider === "openai") return createMessageOpenAI(resolved);
-  if (provider === "nvidia") return createMessageNvidia(resolved);
+  if (provider === "openai")  return createMessageOpenAI(resolved);
+  if (provider === "nvidia")  return createMessageNvidia(resolved);
+  if (provider === "ollama")  return createMessageOllama(resolved);
   return createMessageAnthropic(resolved);
 }
