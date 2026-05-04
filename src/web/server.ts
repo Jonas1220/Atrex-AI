@@ -180,32 +180,29 @@ app.get("/setup/status", async (_req, res) => {
   try { cfgProvider = (JSON.parse(readText(cfgPath("settings.json"))) as Record<string, string>).provider ?? "anthropic"; } catch {}
   res.json({
     needsSetup: !process.env.TELEGRAM_BOT_TOKEN ||
-      (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !process.env.NVIDIA_API_KEY && cfgProvider !== "ollama"),
+      (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && cfgProvider !== "ollama"),
     telegram:  !!process.env.TELEGRAM_BOT_TOKEN,
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai:    isOpenAIConnected(),
-    nvidia:    !!process.env.NVIDIA_API_KEY,
     ollama:    ollamaOk,
   });
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, nvidiaKey, ollamaUrl, provider, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, ollamaUrl, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
   if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
   if (anthropicKey)                 updates["ANTHROPIC_API_KEY"]  = anthropicKey;
-  if (nvidiaKey)                    updates["NVIDIA_API_KEY"]      = nvidiaKey;
   if (ollamaUrl)                    updates["OLLAMA_BASE_URL"]     = ollamaUrl;
   if (allowedUserIds !== undefined) updates["ALLOWED_USER_IDS"]   = allowedUserIds;
   if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
     updateEnvFile(updates);
-    if (provider && ["anthropic", "openai", "nvidia", "ollama"].includes(provider)) {
+    if (provider && ["anthropic", "openai", "ollama"].includes(provider)) {
       const defaultModels: Record<string, string> = {
         anthropic: "claude-sonnet-4-6",
         openai:    "gpt-4o",
-        nvidia:    "meta/llama-4-maverick-17b-128e-instruct",
         ollama:    "llama3.2",
       };
       let cfg: Record<string, unknown> = {};
@@ -280,7 +277,6 @@ app.get("/api/provider", async (_req, res) => {
     anthropicReady: !!process.env.ANTHROPIC_API_KEY,
     anthropicOAuth: isAnthropicOAuthConnected(),
     openaiReady:    isOpenAIConnected(),
-    nvidiaReady:    !!process.env.NVIDIA_API_KEY,
     ollamaReady:    ollamaOk,
     ollamaBaseUrl:  getOllamaBaseUrl(),
   });
@@ -288,8 +284,8 @@ app.get("/api/provider", async (_req, res) => {
 
 app.post("/api/provider/switch", async (req, res) => {
   const { provider } = req.body as { provider?: string };
-  if (!["anthropic", "openai", "nvidia", "ollama"].includes(provider ?? "")) {
-    res.status(400).json({ error: "provider must be 'anthropic', 'openai', 'nvidia', or 'ollama'" });
+  if (!["anthropic", "openai", "ollama"].includes(provider ?? "")) {
+    res.status(400).json({ error: "provider must be 'anthropic', 'openai', or 'ollama'" });
     return;
   }
   if (provider === "openai" && !isOpenAIConnected()) {
@@ -300,16 +296,12 @@ app.post("/api/provider/switch", async (req, res) => {
     res.status(400).json({ error: "Anthropic has no API key or OAuth token." });
     return;
   }
-  if (provider === "nvidia" && !process.env.NVIDIA_API_KEY) {
-    res.status(400).json({ error: "NVIDIA_API_KEY is not set." });
-    return;
-  }
   if (provider === "ollama" && !(await isOllamaReachable())) {
     res.status(400).json({ error: `Ollama is not reachable at ${getOllamaBaseUrl()}. Make sure it's running.` });
     return;
   }
 
-  setRuntimeProvider(provider as "anthropic" | "openai" | "nvidia" | "ollama");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "ollama");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -323,13 +315,13 @@ app.post("/api/provider/switch", async (req, res) => {
 app.post("/api/provider/model", (req, res) => {
   const { provider, model } = req.body as { provider?: string; model?: string };
   if (!provider || !model) { res.status(400).json({ error: "provider and model required" }); return; }
-  if (!["anthropic", "openai", "nvidia", "ollama"].includes(provider)) {
+  if (!["anthropic", "openai", "ollama"].includes(provider)) {
     res.status(400).json({ error: "unknown provider" }); return;
   }
 
   // Apply live — no restart needed
   setRuntimeModel(model);
-  setRuntimeProvider(provider as "anthropic" | "openai" | "nvidia" | "ollama");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "ollama");
 
   // Persist to settings.json
   let cfg: Record<string, unknown> = {};
@@ -347,8 +339,7 @@ app.put("/api/provider/apikey", (req, res) => {
   if (!provider || !key) { res.status(400).json({ error: "provider and key required" }); return; }
   let envKey: string;
   if (provider === "anthropic")      envKey = "ANTHROPIC_API_KEY";
-  else if (provider === "nvidia")    envKey = "NVIDIA_API_KEY";
-  else { res.status(400).json({ error: "API keys can only be set for anthropic and nvidia" }); return; }
+  else { res.status(400).json({ error: "API keys can only be set for anthropic" }); return; }
   updateEnvFile({ [envKey]: key });
   process.env[envKey] = key;
   log.info(`${envKey} updated via web admin.`);
@@ -791,15 +782,6 @@ app.get("/api/provider/models", async (req, res) => {
       if (!key) { res.json({ models: [] }); return; }
       const r = await fetch("https://api.anthropic.com/v1/models", {
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
-      });
-      const data = await r.json() as { data?: { id: string }[] };
-      const models = (data.data ?? []).map((m: { id: string }) => m.id);
-      res.json({ models });
-    } else if (provider === "nvidia") {
-      const key = process.env.NVIDIA_API_KEY;
-      if (!key) { res.json({ models: [] }); return; }
-      const r = await fetch("https://integrate.api.nvidia.com/v1/models", {
-        headers: { Authorization: `Bearer ${key}` },
       });
       const data = await r.json() as { data?: { id: string }[] };
       const models = (data.data ?? []).map((m: { id: string }) => m.id);

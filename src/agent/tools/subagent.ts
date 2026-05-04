@@ -15,7 +15,7 @@ const AGENTS_DIR = join(process.cwd(), "agents");
 interface AgentPersona {
   systemPrompt: string;
   model?: string;
-  provider?: "anthropic" | "openai" | "nvidia";
+  provider?: "anthropic" | "openai" | "ollama";
 }
 
 // Parses optional YAML frontmatter (model, provider) from agents/<role>.md
@@ -39,7 +39,7 @@ function loadAgentPersona(role: string): AgentPersona {
   const model = get("model");
   const providerRaw = get("provider");
   const provider =
-    providerRaw === "openai" || providerRaw === "nvidia" || providerRaw === "anthropic"
+    providerRaw === "openai" || providerRaw === "ollama" || providerRaw === "anthropic"
       ? providerRaw
       : undefined;
 

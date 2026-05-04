@@ -925,10 +925,6 @@
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--amber);background:var(--amber-dim);color:var(--amber);cursor:pointer;transition:all 0.15s">
             Anthropic
           </button>
-          <button id="wprov-nvidia" onclick="selectWizardProvider('nvidia')"
-            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
-            NVIDIA
-          </button>
           <button id="wprov-openai" onclick="selectWizardProvider('openai')"
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
             OpenAI
@@ -943,13 +939,6 @@
                  placeholder="sk-ant-…" autocomplete="off" />
           <div class="wizard-hint" style="margin-top:8px">
             Get yours at <strong>console.anthropic.com</strong> → API Keys.
-          </div>
-        </div>
-        <div id="wprov-fields-nvidia" style="display:none">
-          <input id="w-nvidia-key" class="wizard-input" type="password"
-                 placeholder="nvapi-…" autocomplete="off" />
-          <div class="wizard-hint" style="margin-top:8px">
-            Get yours at <strong>build.nvidia.com</strong> → API Keys. Free tier available.
           </div>
         </div>
         <div id="wprov-fields-openai" style="display:none">
@@ -1297,7 +1286,7 @@ let _wizardProvider = 'anthropic';
 
 function selectWizardProvider(p) {
   _wizardProvider = p;
-  ['anthropic', 'nvidia', 'openai', 'ollama'].forEach(id => {
+  ['anthropic', 'openai', 'ollama'].forEach(id => {
     const btn = document.getElementById(`wprov-${id}`);
     const fields = document.getElementById(`wprov-fields-${id}`);
     const active = id === p;
@@ -1315,13 +1304,12 @@ async function wizardSaveCore() {
   const errEl = document.getElementById('w-core-err');
 
   const anth      = document.getElementById('w-anth-key')?.value.trim() || '';
-  const nvidia    = document.getElementById('w-nvidia-key')?.value.trim() || '';
   const ollamaUrl = document.getElementById('w-ollama-url')?.value.trim() || 'http://localhost:11434';
 
   const noKeyNeeded = _wizardProvider === 'openai' || _wizardProvider === 'ollama';
-  const hasKey = noKeyNeeded || anth || nvidia;
+  const hasKey = noKeyNeeded || anth;
   if (!tg || !hasKey) {
-    errEl.textContent = `Telegram Bot Token and ${_wizardProvider === 'nvidia' ? 'NVIDIA' : 'Anthropic'} API Key are required.`;
+    errEl.textContent = 'Telegram Bot Token and Anthropic API Key are required.';
     errEl.classList.remove('hidden');
     return;
   }
@@ -1333,7 +1321,6 @@ async function wizardSaveCore() {
     body: JSON.stringify({
       telegramToken: tg,
       ...(anth      ? { anthropicKey: anth }        : {}),
-      ...(nvidia    ? { nvidiaKey: nvidia }          : {}),
       ...(_wizardProvider === 'ollama' ? { ollamaUrl } : {}),
       provider: _wizardProvider,
       allowedUserIds: ids,
@@ -2122,11 +2109,10 @@ async function deleteSecretKey(key) {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 async function renderSettings() {
-  const [data, prov, anthropicList, nvidiaList, openaiList, ollamaList] = await Promise.all([
+  const [data, prov, anthropicList, openaiList, ollamaList] = await Promise.all([
     get('/api/settings'),
     get('/api/provider'),
     get('/api/provider/models?provider=anthropic').catch(() => null),
-    get('/api/provider/models?provider=nvidia').catch(() => null),
     get('/api/provider/models?provider=openai').catch(() => null),
     get('/api/provider/models?provider=ollama').catch(() => null),
   ]);
@@ -2134,24 +2120,18 @@ async function renderSettings() {
 
   const p = prov || {
     active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
-    anthropicReady: false, anthropicOAuth: false, openaiReady: false, nvidiaReady: false,
+    anthropicReady: false, anthropicOAuth: false, openaiReady: false,
     ollamaReady: false, ollamaBaseUrl: 'http://localhost:11434',
   };
 
   // Fallback lists used when API fetch fails or key isn't set yet
   const fallbackAnthropic = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'];
   const fallbackOpenAI    = ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'];
-  const fallbackNvidia    = [
-    'meta/llama-4-maverick-17b-128e-instruct',
-    'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  ];
   const fallbackOllama    = ['llama3.2', 'llama3.1', 'mistral', 'codellama'];
 
   const anthropicModels = (anthropicList?.models?.length ? anthropicList.models : fallbackAnthropic)
     .map(id => ({ id, label: id }));
   const openaiModels    = (openaiList?.models?.length ? openaiList.models : fallbackOpenAI)
-    .map(id => ({ id, label: id }));
-  const nvidiaModels    = (nvidiaList?.models?.length ? nvidiaList.models : fallbackNvidia)
     .map(id => ({ id, label: id }));
   const ollamaModels    = (ollamaList?.models?.length ? ollamaList.models : fallbackOllama)
     .map(id => ({ id, label: id }));
@@ -2199,19 +2179,6 @@ async function renderSettings() {
       <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('anthropic')">Save</button>
     </div>`;
 
-  const nvidiaClickable = p.nvidiaReady;
-  const nvidiaBadges = p.nvidiaReady
-    ? `<span class="badge badge-ok">API key set</span>`
-    : `<span class="badge badge-warn">No API key</span>`;
-  const nvidiaActions = `
-    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
-      <input id="nvidia-key-input" type="password" placeholder="${p.nvidiaReady ? 'Update API key…' : 'nvapi-…'}"
-             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
-                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
-             autocomplete="off" />
-      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('nvidia')">Save</button>
-    </div>`;
-
   const ollamaClickable = p.ollamaReady;
   const ollamaBadges = p.ollamaReady
     ? `<span class="badge badge-ok">Connected</span>`
@@ -2247,7 +2214,6 @@ async function renderSettings() {
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
           ${provCard('anthropic', 'Anthropic', 'Claude models', anthropicBadges, anthropicActions, true)}
-          ${provCard('nvidia', 'NVIDIA NIM', 'Kimi K2.5 and other models', nvidiaBadges, nvidiaActions, nvidiaClickable)}
           ${provCard('openai', 'OpenAI', 'GPT models via ChatGPT account', '', openaiActions, openaiClickable)}
           ${provCard('ollama', 'Ollama', 'Local models — no API key needed', ollamaBadges, ollamaActions, ollamaClickable)}
         </div>
@@ -2261,13 +2227,6 @@ async function renderSettings() {
             <select id="anthropic-model-sel" class="skill-input" style="width:100%;cursor:pointer"
                     onchange="saveModel('anthropic', this.value)">
               ${modelOpts(anthropicModels, p.model)}
-            </select>
-          </div>
-          <div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">NVIDIA Model</div>
-            <select id="nvidia-model-sel" class="skill-input" style="width:100%;cursor:pointer"
-                    onchange="saveModel('nvidia', this.value)">
-              ${modelOpts(nvidiaModels, p.model)}
             </select>
           </div>
           <div>
@@ -2777,7 +2736,7 @@ async function createNewSkill() {
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────
-const AGENT_PROVIDERS = ['anthropic', 'openai', 'nvidia'];
+const AGENT_PROVIDERS = ['anthropic', 'openai', 'ollama'];
 
 async function renderAgents() {
   const agents = await get('/api/agents');
@@ -2892,7 +2851,7 @@ function showNewAgentModal() {
           <option value="">Global default</option>
           <option value="anthropic">anthropic</option>
           <option value="openai">openai</option>
-          <option value="nvidia">nvidia</option>
+          <option value="ollama">ollama</option>
         </select>
       </div>
       <div class="skill-field">
