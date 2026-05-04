@@ -5,16 +5,16 @@ import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getActiveSkillId } from "../skills";
 
-const LONG_TERM_PATH = join(process.cwd(), "memory/memory.md");
-const MEMORY_DIR = join(process.cwd(), "memory");
-const SKILL_MEMORY_DIR = join(process.cwd(), "memory/skills");
+const LONG_TERM_PATH = join(process.cwd(), "config/memory.md");
+const CONFIG_DIR = join(process.cwd(), "config");
+const SKILL_CONFIG_DIR = join(process.cwd(), "config/skill-memory");
 
 function skillMemoryPath(skillId: string): string {
-  return join(SKILL_MEMORY_DIR, `${skillId}.md`);
+  return join(SKILL_CONFIG_DIR, `${skillId}.md`);
 }
 
 function ensureSkillMemoryDir(): void {
-  mkdirSync(SKILL_MEMORY_DIR, { recursive: true });
+  mkdirSync(SKILL_CONFIG_DIR, { recursive: true });
 }
 
 function readFile(path: string): string {
@@ -94,7 +94,7 @@ export const memoryHandlers: Record<string, (input: Record<string, unknown>) => 
     const timestamp = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
     if (type === "long_term") {
-      mkdirSync(MEMORY_DIR, { recursive: true });
+      mkdirSync(CONFIG_DIR, { recursive: true });
       const current = readFile(LONG_TERM_PATH);
       const entry = `- ${content}`;
       const updated = current.trimEnd() + "\n" + entry + "\n";
@@ -121,7 +121,7 @@ export const memoryHandlers: Record<string, (input: Record<string, unknown>) => 
 
   update_long_term_memory: async (input) => {
     const content = input.content as string;
-    mkdirSync(MEMORY_DIR, { recursive: true });
+    mkdirSync(CONFIG_DIR, { recursive: true });
     writeFileSync(LONG_TERM_PATH, content, "utf-8");
     return "Long-term memory updated.";
   },

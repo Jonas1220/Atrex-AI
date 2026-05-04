@@ -28,7 +28,7 @@ import { log } from "../logger";
 
 const ROOT = process.cwd();
 const cfgPath = (f: string) => join(ROOT, "config", f);
-const memPath = (f: string) => join(ROOT, "memory", f);
+const memPath = (f: string) => join(ROOT, "config", f);
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));

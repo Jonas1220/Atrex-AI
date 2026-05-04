@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { loadSkill, setActiveSkillId } from "../skills";
 
-const SKILL_MEMORY_DIR = join(process.cwd(), "memory/skills");
+const SKILL_MEMORY_DIR = join(process.cwd(), "config/skill-memory");
 
 function readSkillMemory(skillId: string): string {
   try {
