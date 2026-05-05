@@ -47,8 +47,8 @@ async function isOllamaReachable(): Promise<boolean> {
     } else {
       const headers: Record<string, string> = {};
       if (process.env.OLLAMA_API_KEY) headers["Authorization"] = `Bearer ${process.env.OLLAMA_API_KEY}`;
-      const base = rawUrl.endsWith("/v1") ? rawUrl : `${rawUrl}/v1`;
-      const r = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(2000) });
+      const base = rawUrl.replace(/\/v1$/, "");
+      const r = await fetch(`${base}/api/tags`, { headers, signal: AbortSignal.timeout(2000) });
       return r.ok;
     }
   } catch {

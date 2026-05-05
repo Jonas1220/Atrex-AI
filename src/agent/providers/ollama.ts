@@ -1,7 +1,7 @@
-// Ollama provider adapter — local/self-hosted LLM running via Ollama.
+// Ollama provider adapter.
 // Two connection modes:
-//   url    — connects to OLLAMA_BASE_URL (default localhost:11434), no auth
-//   apikey — connects to OLLAMA_BASE_URL with OLLAMA_API_KEY in the Authorization header
+//   url    — OpenAI-compat /v1/chat/completions via OLLAMA_BASE_URL (default localhost:11434)
+//   apikey — Native Ollama /api/chat via OLLAMA_BASE_URL + OLLAMA_API_KEY bearer token
 // Mode is auto-detected from which env vars are set, or set explicitly via OLLAMA_MODE.
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
@@ -20,6 +20,7 @@ export function getOllamaMode(): "apikey" | "url" {
   return process.env.OLLAMA_API_KEY ? "apikey" : "url";
 }
 
+// Returns the base URL with /v1 appended — used by the OpenAI-compat path (url mode).
 export function getOllamaBaseUrl(): string {
   const raw = (process.env.OLLAMA_BASE_URL ?? "").replace(/\/$/, "");
   const base = raw || (getOllamaMode() === "url" ? "http://localhost:11434" : "");
@@ -27,7 +28,12 @@ export function getOllamaBaseUrl(): string {
   return base.endsWith("/v1") ? base : `${base}/v1`;
 }
 
-// ── Request conversion: Anthropic → OpenAI ────────────────────────────────────
+// Returns the raw base URL without /v1 — used by the native /api/chat path (apikey mode).
+function getRawBase(): string {
+  return (process.env.OLLAMA_BASE_URL ?? "").replace(/\/$/, "").replace(/\/v1$/, "");
+}
+
+// ── Shared helper ─────────────────────────────────────────────────────────────
 
 function systemText(blocks: Anthropic.TextBlockParam[]): string {
   return blocks
@@ -35,6 +41,8 @@ function systemText(blocks: Anthropic.TextBlockParam[]): string {
     .map((b) => b.text)
     .join("\n\n");
 }
+
+// ── URL mode: Anthropic → OpenAI-compat ──────────────────────────────────────
 
 function convertMessages(msgs: Anthropic.MessageParam[]): ChatCompletionMessageParam[] {
   const out: ChatCompletionMessageParam[] = [];
@@ -68,8 +76,8 @@ function convertMessages(msgs: Anthropic.MessageParam[]): ChatCompletionMessageP
         continue;
       }
 
-      const textBlocks  = msg.content.filter((b): b is Anthropic.TextBlock    => b.type === "text");
-      const toolBlocks  = msg.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+      const textBlocks = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
+      const toolBlocks = msg.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
 
       const tool_calls: ChatCompletionMessageToolCall[] = toolBlocks.map((b) => ({
         id:       b.id,
@@ -99,8 +107,6 @@ function convertTools(tools: Anthropic.Tool[]): ChatCompletionTool[] {
   }));
 }
 
-// ── Response conversion: OpenAI → Anthropic ──────────────────────────────────
-
 // Some models emit a tool call as JSON text in content instead of using tool_calls.
 function extractTextToolCall(text: string): { name: string; input: Record<string, unknown> } | null {
   const trimmed = text.trim();
@@ -123,10 +129,7 @@ function extractTextToolCall(text: string): { name: string; input: Record<string
   return null;
 }
 
-function convertResponse(
-  completion: OpenAI.Chat.ChatCompletion,
-  originalModel: string
-): Anthropic.Message {
+function convertResponse(completion: OpenAI.Chat.ChatCompletion, originalModel: string): Anthropic.Message {
   const choice = completion.choices[0];
   const msg    = choice.message;
 
@@ -153,10 +156,9 @@ function convertResponse(
     content.push({ type: "tool_use", id: tc.id, name: fn.name, input: input as Record<string, unknown> });
   }
 
-  const finishReason = choice.finish_reason;
   const stopReason: Anthropic.Message["stop_reason"] =
-    forceToolUse || finishReason === "tool_calls" ? "tool_use"
-    : finishReason === "length"                   ? "max_tokens"
+    forceToolUse || choice.finish_reason === "tool_calls" ? "tool_use"
+    : choice.finish_reason === "length"                   ? "max_tokens"
     : "end_turn";
 
   const usage = completion.usage;
@@ -177,28 +179,198 @@ function convertResponse(
   };
 }
 
+// ── API key mode: Anthropic → native Ollama /api/chat ────────────────────────
+// Ollama.com hosted API uses POST /api/chat with bearer token auth.
+// The native format differs from OpenAI-compat: no tool_call_id on tool results,
+// tool call IDs are absent in responses (we generate them), and the response
+// envelope is {message, done_reason} not {choices: [{message, finish_reason}]}.
+
+type NativeMessage =
+  | { role: "system" | "user" | "assistant"; content: string; tool_calls?: NativeToolCall[] }
+  | { role: "tool"; content: string };
+
+type NativeToolCall = { function: { name: string; arguments: Record<string, unknown> } };
+
+type NativeResponse = {
+  model: string;
+  message: {
+    role: "assistant";
+    content: string;
+    tool_calls?: NativeToolCall[];
+  };
+  done: boolean;
+  done_reason: string;
+  prompt_eval_count?: number;
+  eval_count?: number;
+};
+
+function convertMessagesNative(msgs: Anthropic.MessageParam[]): NativeMessage[] {
+  const out: NativeMessage[] = [];
+
+  for (const msg of msgs) {
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
+        out.push({ role: "user", content: msg.content });
+        continue;
+      }
+
+      let userText = "";
+      for (const block of msg.content) {
+        if (block.type === "tool_result") {
+          const content =
+            typeof block.content === "string"
+              ? block.content
+              : (block.content as Anthropic.TextBlockParam[])
+                  .filter((b) => b.type === "text")
+                  .map((b) => b.text)
+                  .join("\n");
+          out.push({ role: "tool", content });
+        } else if (block.type === "text") {
+          userText += (userText ? "\n" : "") + block.text;
+        }
+      }
+      if (userText) out.push({ role: "user", content: userText });
+    } else if (msg.role === "assistant") {
+      if (typeof msg.content === "string") {
+        out.push({ role: "assistant", content: msg.content });
+        continue;
+      }
+
+      const textBlocks = msg.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
+      const toolBlocks = msg.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+
+      const tool_calls: NativeToolCall[] = toolBlocks.map((b) => ({
+        function: { name: b.name, arguments: b.input as Record<string, unknown> },
+      }));
+
+      out.push({
+        role:    "assistant",
+        content: textBlocks.map((b) => b.text).join("\n") || "",
+        ...(tool_calls.length > 0 ? { tool_calls } : {}),
+      });
+    }
+  }
+
+  return out;
+}
+
+function convertToolsNative(tools: Anthropic.Tool[]): NativeToolCall["function"] extends infer F ? { type: "function"; function: F }[] : never {
+  return tools.map((t) => ({
+    type:     "function" as const,
+    function: {
+      name:        t.name,
+      description: t.description ?? "",
+      parameters:  t.input_schema as Record<string, unknown>,
+    },
+  })) as never;
+}
+
+function convertResponseNative(response: NativeResponse, originalModel: string): Anthropic.Message {
+  const msg     = response.message;
+  const content: Array<Anthropic.TextBlock | Anthropic.ToolUseBlock> = [];
+
+  if (msg.content) {
+    content.push({ type: "text", text: msg.content, citations: null });
+  }
+
+  let i = 0;
+  for (const tc of msg.tool_calls ?? []) {
+    const args = tc.function.arguments;
+    const input = typeof args === "string" ? (() => { try { return JSON.parse(args); } catch { return {}; } })() : args;
+    content.push({
+      type:  "tool_use",
+      id:    `toolu_${Date.now()}_${i++}`,
+      name:  tc.function.name,
+      input: input as Record<string, unknown>,
+    });
+  }
+
+  const stopReason: Anthropic.Message["stop_reason"] =
+    (msg.tool_calls?.length ?? 0) > 0 ? "tool_use"
+    : response.done_reason === "length" ? "max_tokens"
+    : "end_turn";
+
+  return {
+    id:            `msg_ollama_${Date.now()}`,
+    type:          "message",
+    role:          "assistant",
+    model:         originalModel,
+    content,
+    stop_reason:   stopReason,
+    stop_sequence: null,
+    usage: {
+      input_tokens:                response.prompt_eval_count ?? 0,
+      output_tokens:               response.eval_count        ?? 0,
+      cache_read_input_tokens:     null,
+      cache_creation_input_tokens: null,
+    },
+  };
+}
+
+async function createMessageOllamaNative(
+  params: Anthropic.MessageCreateParamsNonStreaming
+): Promise<Anthropic.Message> {
+  const model   = params.model || getActiveModel();
+  const rawBase = getRawBase();
+  if (!rawBase) throw new Error("Ollama: OLLAMA_BASE_URL is required in API key mode. Set it in the dashboard.");
+
+  const endpoint = `${rawBase}/api/chat`;
+  const apiKey   = process.env.OLLAMA_API_KEY;
+
+  const systemBlocks = (params.system ?? []) as Anthropic.TextBlockParam[];
+  const systemStr    = systemText(systemBlocks);
+  const tools        = (params.tools ?? []) as Anthropic.Tool[];
+
+  const messages: NativeMessage[] = [
+    ...(systemStr ? [{ role: "system" as const, content: systemStr }] : []),
+    ...convertMessagesNative(params.messages),
+  ];
+
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    stream: false,
+    ...(tools.length > 0 ? { tools: convertToolsNative(tools) } : {}),
+  };
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+  log.agent(`[ollama-api] ${model} @ ${endpoint} — ${messages.length} messages`);
+
+  const r = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body) });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => r.statusText);
+    throw new Error(`Ollama API error ${r.status}: ${errText}`);
+  }
+
+  const response = await r.json() as NativeResponse;
+  return convertResponseNative(response, model);
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function createMessageOllama(
   params: Anthropic.MessageCreateParamsNonStreaming
 ): Promise<Anthropic.Message> {
+  if (getOllamaMode() === "apikey") {
+    return createMessageOllamaNative(params);
+  }
+
+  // url mode — local Ollama via OpenAI-compat /v1/chat/completions
   const model   = params.model || getActiveModel();
-  const mode    = getOllamaMode();
   const baseURL = getOllamaBaseUrl();
-  if (!baseURL) throw new Error("Ollama: OLLAMA_BASE_URL is required in API key mode. Set it in the dashboard.");
-  const apiKey  = mode === "apikey" ? (process.env.OLLAMA_API_KEY || "ollama") : "ollama";
-  const client  = new OpenAI({ apiKey, baseURL });
+  const client  = new OpenAI({ apiKey: "ollama", baseURL });
 
   const systemBlocks = (params.system ?? []) as Anthropic.TextBlockParam[];
   const systemStr    = systemText(systemBlocks);
   const messages     = convertMessages(params.messages);
+  const tools        = (params.tools ?? []) as Anthropic.Tool[];
 
   const fullMessages: ChatCompletionMessageParam[] = [
     ...(systemStr ? [{ role: "system" as const, content: systemStr }] : []),
     ...messages,
   ];
-
-  const tools = (params.tools ?? []) as Anthropic.Tool[];
 
   const req: ChatCompletionCreateParamsNonStreaming = {
     model,
