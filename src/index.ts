@@ -8,7 +8,10 @@ import { startWebServer } from "./web/server";
 startWebServer();
 
 if (!isConfigured) {
-  log.warn("Atrexai not configured — running in setup mode. Visit http://localhost:3000");
+  const port = process.env.WEB_ADMIN_PORT || "3000";
+  log.warn(`Atrexai not configured — running in setup mode.`);
+  log.warn(`  Terminal:  atrex setup`);
+  log.warn(`  Dashboard: http://localhost:${port}`);
 } else {
   const { loadAllEnabled } = require("./plugins/loader");
   const { startScheduler } = require("./scheduler/runner");

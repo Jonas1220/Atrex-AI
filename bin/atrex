@@ -80,6 +80,10 @@ cmd_start() {
     return
   fi
 
+  if [ ! -f "$INSTALL_DIR/dist/index.js" ]; then
+    fail "Build artefacts missing — run ${BOLD}npm run build${RESET} in $INSTALL_DIR."
+  fi
+
   info "Starting Atrex AI…"
 
   if [ "$HAS_PM2" = true ]; then
@@ -95,8 +99,14 @@ cmd_start() {
     mkdir -p "$CONFIG_DIR"
     cd "$INSTALL_DIR"
     nohup node dist/index.js >> "$CONFIG_DIR/agent.log" 2>&1 &
-    echo $! > "$PID_FILE"
-    ok "Started (PID $(cat "$PID_FILE"))"
+    local NEW_PID=$!
+    # Verify the process actually stayed alive — node could've crashed instantly
+    sleep 0.5
+    if ! kill -0 "$NEW_PID" 2>/dev/null; then
+      fail "Agent failed to start — see ${BOLD}$CONFIG_DIR/agent.log${RESET}"
+    fi
+    echo "$NEW_PID" > "$PID_FILE"
+    ok "Started (PID $NEW_PID)"
     info "Logs: $CONFIG_DIR/agent.log"
   fi
 
@@ -179,21 +189,26 @@ cmd_logs() {
     return
   fi
 
-  # Fall back to log files in the install dir
-  local LOGS_DIR="$INSTALL_DIR/logs"
-  if [ ! -d "$LOGS_DIR" ]; then
-    fail "No logs directory found at $LOGS_DIR"
+  # No-PM2 install: nohup output lands in $CONFIG_DIR/agent.log; the agent itself
+  # writes structured logs to $INSTALL_DIR/logs/YYYY-MM-DD.log. Prefer the
+  # structured ones if they exist.
+  local STRUCTURED_DIR="$INSTALL_DIR/logs"
+  local LATEST=""
+  if [ -d "$STRUCTURED_DIR" ]; then
+    LATEST=$(ls -t "$STRUCTURED_DIR"/*.log 2>/dev/null | head -1 || true)
   fi
 
-  local LATEST
-  LATEST=$(ls -t "$LOGS_DIR"/*.log 2>/dev/null | head -1 || true)
+  if [ -z "$LATEST" ] && [ -f "$CONFIG_DIR/agent.log" ]; then
+    LATEST="$CONFIG_DIR/agent.log"
+  fi
+
   if [ -z "$LATEST" ]; then
-    warn "No log files found yet."
+    warn "No log files found yet — start the agent first with ${BOLD}atrex start${RESET}."
     return
   fi
 
   info "Tailing $LATEST"
-  tail -f "$LATEST"
+  tail -n "$LINES" -f "$LATEST"
 }
 
 cmd_update() {
@@ -302,12 +317,43 @@ cmd_open() {
 }
 
 cmd_setup() {
-  if ! is_running; then
-    info "Starting in setup mode…"
-    cmd_start
-    sleep 1
+  cd "$INSTALL_DIR"
+
+  if [ ! -f "dist/setup-cli.js" ]; then
+    fail "Setup script missing — run 'npm run build' in $INSTALL_DIR first."
   fi
-  cmd_open
+
+  local WAS_RUNNING=false
+  if is_running; then
+    WAS_RUNNING=true
+    info "Stopping agent for setup…"
+    cmd_stop
+  fi
+
+  echo ""
+  node dist/setup-cli.js
+  local SETUP_RC=$?
+  if [ "$SETUP_RC" -ne 0 ]; then
+    if [ "$WAS_RUNNING" = true ]; then
+      info "Restarting agent…"
+      cmd_start
+    fi
+    exit "$SETUP_RC"
+  fi
+
+  if [ "$WAS_RUNNING" = true ]; then
+    info "Restarting agent with new config…"
+    cmd_start
+    return
+  fi
+
+  echo -n "  Start the agent now? [Y/n] "
+  read -r ANS
+  if [[ ! "$ANS" =~ ^[Nn]$ ]]; then
+    cmd_start
+  else
+    info "Run ${BOLD}atrex start${RESET} when ready."
+  fi
 }
 
 cmd_token() {
@@ -343,7 +389,7 @@ cmd_help() {
   echo -e "    ${AMBER}logs${RESET}       Tail live log output"
   echo -e "    ${AMBER}update${RESET}     Pull latest code and restart"
   echo -e "    ${AMBER}open${RESET}       Open the web dashboard in your browser"
-  echo -e "    ${AMBER}setup${RESET}      Start the agent and open the onboarding wizard"
+  echo -e "    ${AMBER}setup${RESET}      Run the terminal onboarding wizard (Telegram + AI provider)"
   echo -e "    ${AMBER}token${RESET}      Show the web dashboard admin token"
   echo -e "    ${AMBER}uninstall${RESET}  Remove Atrex AI and all its files"
   echo -e "    ${AMBER}help${RESET}       Show this message"
