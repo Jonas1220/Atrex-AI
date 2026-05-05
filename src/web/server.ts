@@ -281,7 +281,7 @@ app.get("/api/provider", async (_req, res) => {
     anthropicOAuth: isAnthropicOAuthConnected(),
     openaiReady:    isOpenAIConnected(),
     ollamaReady:     ollamaOk,
-    ollamaBaseUrl:   getOllamaBaseUrl(),
+    ollamaBaseUrl:   process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
     ollamaApiKeySet: !!process.env.OLLAMA_API_KEY,
   });
 });
