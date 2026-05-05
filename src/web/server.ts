@@ -11,7 +11,7 @@ import { createOAuthRouter } from "../google/oauth";
 import { isGoogleConnected } from "../google/auth";
 import { createOpenAIRouter } from "../openai/oauth";
 import { isOpenAIConnected } from "../openai/auth";
-import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel } from "../agent/providers";
+import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel, isMoonshotConnected } from "../agent/providers";
 import {
   listSkills,
   loadSkill,
@@ -159,16 +159,18 @@ ensureMainSkill();
 
 // ── Setup endpoints (always accessible — registered before auth middleware) ──
 app.get("/setup/status", (_req, res) => {
+  const moonshot = isMoonshotConnected();
   res.json({
-    needsSetup: !process.env.TELEGRAM_BOT_TOKEN || (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected()),
+    needsSetup: !process.env.TELEGRAM_BOT_TOKEN || (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !moonshot),
     telegram:  !!process.env.TELEGRAM_BOT_TOKEN,
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai:    isOpenAIConnected(),
+    moonshot,
   });
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, provider, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, moonshotKey, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
   if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
@@ -177,8 +179,12 @@ app.put("/setup/core", (req, res) => {
   if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
     updateEnvFile(updates);
-    if (provider && ["anthropic", "openai"].includes(provider)) {
-      const defaultModels: Record<string, string> = { anthropic: "claude-sonnet-4-6", openai: "gpt-4o" };
+    if (provider && ["anthropic", "openai", "moonshot"].includes(provider)) {
+      const defaultModels: Record<string, string> = {
+        anthropic: "claude-sonnet-4-6",
+        openai:    "gpt-4o",
+        moonshot:  "kimi-k2.6",
+      };
       let cfg: Record<string, unknown> = {};
       try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
       cfg.provider = provider;
@@ -186,6 +192,10 @@ app.put("/setup/core", (req, res) => {
         cfg.model = defaultModels[provider];
       }
       writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
+    }
+    if (moonshotKey) {
+      updateEnvFile({ MOONSHOT_API_KEY: moonshotKey });
+      process.env.MOONSHOT_API_KEY = moonshotKey;
     }
     log.info("Core credentials saved via setup wizard.");
     res.json({ ok: true });
@@ -249,13 +259,14 @@ app.get("/api/provider", (_req, res) => {
     model:          getActiveModel(),
     anthropicReady: !!process.env.ANTHROPIC_API_KEY,
     openaiReady:    isOpenAIConnected(),
+    moonshotReady:  isMoonshotConnected(),
   });
 });
 
 app.post("/api/provider/switch", (req, res) => {
   const { provider } = req.body as { provider?: string };
-  if (!["anthropic", "openai"].includes(provider ?? "")) {
-    res.status(400).json({ error: "provider must be 'anthropic' or 'openai'" });
+  if (!["anthropic", "openai", "moonshot"].includes(provider ?? "")) {
+    res.status(400).json({ error: "provider must be 'anthropic', 'openai', or 'moonshot'" });
     return;
   }
   if (provider === "openai" && !isOpenAIConnected()) {
@@ -266,8 +277,12 @@ app.post("/api/provider/switch", (req, res) => {
     res.status(400).json({ error: "Anthropic API key not set." });
     return;
   }
+  if (provider === "moonshot" && !isMoonshotConnected()) {
+    res.status(400).json({ error: "Moonshot API key not set." });
+    return;
+  }
 
-  setRuntimeProvider(provider as "anthropic" | "openai");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "moonshot");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -281,12 +296,12 @@ app.post("/api/provider/switch", (req, res) => {
 app.post("/api/provider/model", (req, res) => {
   const { provider, model } = req.body as { provider?: string; model?: string };
   if (!provider || !model) { res.status(400).json({ error: "provider and model required" }); return; }
-  if (!["anthropic", "openai"].includes(provider)) {
+  if (!["anthropic", "openai", "moonshot"].includes(provider)) {
     res.status(400).json({ error: "unknown provider" }); return;
   }
 
   setRuntimeModel(model);
-  setRuntimeProvider(provider as "anthropic" | "openai");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "moonshot");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -299,11 +314,19 @@ app.post("/api/provider/model", (req, res) => {
 });
 
 app.put("/api/provider/apikey", (req, res) => {
-  const { key } = req.body as { key?: string };
+  const { key, provider } = req.body as { key?: string; provider?: string };
   if (!key) { res.status(400).json({ error: "key required" }); return; }
-  updateEnvFile({ ANTHROPIC_API_KEY: key });
-  process.env.ANTHROPIC_API_KEY = key;
-  log.info("ANTHROPIC_API_KEY updated via web admin.");
+  if (!provider || provider === "anthropic") {
+    updateEnvFile({ ANTHROPIC_API_KEY: key });
+    process.env.ANTHROPIC_API_KEY = key;
+    log.info("ANTHROPIC_API_KEY updated via web admin.");
+  } else if (provider === "moonshot") {
+    updateEnvFile({ MOONSHOT_API_KEY: key });
+    process.env.MOONSHOT_API_KEY = key;
+    log.info("MOONSHOT_API_KEY updated via web admin.");
+  } else {
+    res.status(400).json({ error: "unknown provider" }); return;
+  }
   res.json({ ok: true });
 });
 
@@ -748,6 +771,15 @@ app.get("/api/provider/models", async (req, res) => {
         .map((m: { id: string }) => m.id)
         .filter((id: string) => id.startsWith("gpt-") || /^o\d/.test(id) || id.startsWith("codex"))
         .sort();
+      res.json({ models });
+    } else if (provider === "moonshot") {
+      const key = process.env.MOONSHOT_API_KEY;
+      if (!key) { res.json({ models: [] }); return; }
+      const r = await fetch("https://api.moonshot.ai/v1/models", {
+        headers: { "Authorization": `Bearer ${key}` },
+      });
+      const data = await r.json() as { data?: { id: string }[] };
+      const models = (data.data ?? []).map((m: { id: string }) => m.id).sort();
       res.json({ models });
     } else {
       res.status(400).json({ error: "unknown provider" });

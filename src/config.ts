@@ -19,7 +19,7 @@ const settingsSchema = z.object({
   max_history: z.number().int().positive().default(50),
   timezone: z.string().default("UTC"),
   // LLM provider. "anthropic" uses ANTHROPIC_API_KEY; "openai" uses OAuth bearer token.
-  provider: z.enum(["anthropic", "openai"]).default("anthropic"),
+  provider: z.enum(["anthropic", "openai", "moonshot"]).default("anthropic"),
   // Tool-loop detection: warn after N identical (tool, input) calls, abort at M.
   tool_loop_warn: z.number().int().positive().default(3),
   tool_loop_max: z.number().int().positive().default(6),
@@ -72,7 +72,7 @@ const envSchema = z.object({
 
 const env = envSchema.parse(process.env);
 
-const hasLLM = !!env.ANTHROPIC_API_KEY || settings.provider === "openai";
+const hasLLM = !!env.ANTHROPIC_API_KEY || settings.provider === "openai" || !!process.env.MOONSHOT_API_KEY;
 const hasTelegram = !!env.TELEGRAM_BOT_TOKEN && hasLLM;
 
 if (!hasTelegram) {

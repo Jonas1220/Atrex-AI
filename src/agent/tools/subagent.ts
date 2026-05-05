@@ -7,7 +7,7 @@ import { join } from "path";
 import { settings } from "../../config";
 import { log } from "../../logger";
 import { getPluginTools, getPluginHandlers } from "../../plugins/loader";
-import { createMessage, getActiveModel, getActiveProvider, MessageOverrides } from "../providers";
+import { createMessage, getActiveModel, getActiveProvider, MessageOverrides, Provider } from "../providers";
 import { codexTools, codexHandlers } from "./codex";
 
 const AGENTS_DIR = join(process.cwd(), "agents");
@@ -15,7 +15,7 @@ const AGENTS_DIR = join(process.cwd(), "agents");
 interface AgentPersona {
   systemPrompt: string;
   model?: string;
-  provider?: "anthropic" | "openai";
+  provider?: Provider;
 }
 
 // Parses optional YAML frontmatter (model, provider) from agents/<role>.md
@@ -39,8 +39,8 @@ function loadAgentPersona(role: string): AgentPersona {
   const model = get("model");
   const providerRaw = get("provider");
   const provider =
-    providerRaw === "openai" || providerRaw === "anthropic"
-      ? providerRaw
+    providerRaw === "openai" || providerRaw === "anthropic" || providerRaw === "moonshot"
+      ? (providerRaw as Provider)
       : undefined;
 
   return { systemPrompt: body, ...(model ? { model } : {}), ...(provider ? { provider } : {}) };

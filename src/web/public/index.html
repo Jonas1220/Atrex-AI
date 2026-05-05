@@ -920,7 +920,7 @@
 
       <div class="wizard-field">
         <div class="wizard-label">AI Provider <span class="wizard-req">*</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
           <button id="wprov-anthropic" onclick="selectWizardProvider('anthropic')"
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--amber);background:var(--amber-dim);color:var(--amber);cursor:pointer;transition:all 0.15s">
             Anthropic
@@ -928,6 +928,10 @@
           <button id="wprov-openai" onclick="selectWizardProvider('openai')"
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
             OpenAI
+          </button>
+          <button id="wprov-moonshot" onclick="selectWizardProvider('moonshot')"
+            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            Moonshot
           </button>
         </div>
         <div id="wprov-fields-anthropic">
@@ -941,6 +945,13 @@
           <div class="wizard-hint" style="margin-bottom:0;padding:12px;background:var(--surface-2);border-radius:6px;border:1px solid var(--border)">
             OpenAI uses OAuth — no API key needed here.<br>
             Connect your ChatGPT account from the Settings page after setup.
+          </div>
+        </div>
+        <div id="wprov-fields-moonshot" style="display:none">
+          <input id="w-moonshot-key" class="wizard-input" type="password"
+                 placeholder="sk-…" autocomplete="off" />
+          <div class="wizard-hint" style="margin-top:8px">
+            Get yours at <strong>platform.kimi.ai</strong> → API Keys.
           </div>
         </div>
       </div>
@@ -1274,7 +1285,7 @@ let _wizardProvider = 'anthropic';
 
 function selectWizardProvider(p) {
   _wizardProvider = p;
-  ['anthropic', 'openai'].forEach(id => {
+  ['anthropic', 'openai', 'moonshot'].forEach(id => {
     const btn = document.getElementById(`wprov-${id}`);
     const fields = document.getElementById(`wprov-fields-${id}`);
     const active = id === p;
@@ -1291,12 +1302,13 @@ async function wizardSaveCore() {
   const adm   = document.getElementById('w-admin-token').value.trim();
   const errEl = document.getElementById('w-core-err');
 
-  const anth = document.getElementById('w-anth-key')?.value.trim() || '';
+  const anth     = document.getElementById('w-anth-key')?.value.trim()     || '';
+  const moonshot = document.getElementById('w-moonshot-key')?.value.trim() || '';
 
   const noKeyNeeded = _wizardProvider === 'openai';
-  const hasKey = noKeyNeeded || anth;
+  const hasKey = noKeyNeeded || anth || moonshot;
   if (!tg || !hasKey) {
-    errEl.textContent = 'Telegram Bot Token and Anthropic API Key are required.';
+    errEl.textContent = 'Telegram Bot Token and an AI Provider API Key are required.';
     errEl.classList.remove('hidden');
     return;
   }
@@ -1307,7 +1319,8 @@ async function wizardSaveCore() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       telegramToken: tg,
-      ...(anth ? { anthropicKey: anth } : {}),
+      ...(anth     ? { anthropicKey: anth }     : {}),
+      ...(moonshot ? { moonshotKey: moonshot }   : {}),
       provider: _wizardProvider,
       allowedUserIds: ids,
       adminToken: adm,
@@ -2095,25 +2108,29 @@ async function deleteSecretKey(key) {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 async function renderSettings() {
-  const [data, prov, anthropicList, openaiList] = await Promise.all([
+  const [data, prov, anthropicList, openaiList, moonshotList] = await Promise.all([
     get('/api/settings'),
     get('/api/provider'),
     get('/api/provider/models?provider=anthropic').catch(() => null),
     get('/api/provider/models?provider=openai').catch(() => null),
+    get('/api/provider/models?provider=moonshot').catch(() => null),
   ]);
   if (!data) return;
 
   const p = prov || {
     active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
-    anthropicReady: false, openaiReady: false,
+    anthropicReady: false, openaiReady: false, moonshotReady: false,
   };
 
   const fallbackAnthropic = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'];
   const fallbackOpenAI    = ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'];
+  const fallbackMoonshot  = ['kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-128k'];
 
   const anthropicModels = (anthropicList?.models?.length ? anthropicList.models : fallbackAnthropic)
     .map(id => ({ id, label: id }));
   const openaiModels    = (openaiList?.models?.length ? openaiList.models : fallbackOpenAI)
+    .map(id => ({ id, label: id }));
+  const moonshotModels  = (moonshotList?.models?.length ? moonshotList.models : fallbackMoonshot)
     .map(id => ({ id, label: id }));
 
   const modelOpts = (models, current) => {
@@ -2152,7 +2169,7 @@ async function renderSettings() {
              style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
                     border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
              autocomplete="off" />
-      <button class="btn btn-secondary btn-sm" onclick="saveAnthropicApiKey()">Save</button>
+      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('anthropic', 'anthropic-key-input')">Save</button>
     </div>`;
 
   const openaiClickable = p.openaiReady;
@@ -2162,6 +2179,18 @@ async function renderSettings() {
          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();disconnectOpenAI()" style="font-size:10px">Disconnect</button>
        </div>`
     : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();showOpenAIConnectModal()">Connect ›</button>`;
+
+  const moonshotBadges = p.moonshotReady
+    ? `<span class="badge badge-ok">API key set</span>`
+    : `<span class="badge badge-warn">No API key</span>`;
+  const moonshotActions = `
+    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="moonshot-key-input" type="password" placeholder="Update API key…"
+             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
+             autocomplete="off" />
+      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('moonshot', 'moonshot-key-input')">Save</button>
+    </div>`;
 
   const el = document.getElementById('content');
   el.innerHTML = `
@@ -2174,15 +2203,16 @@ async function renderSettings() {
           Click a provider to make it active. API keys and model selection are saved immediately.
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
           ${provCard('anthropic', 'Anthropic', 'Claude models via API key', anthropicBadges, anthropicActions, true)}
           ${provCard('openai', 'OpenAI', 'GPT models via ChatGPT account', '', openaiActions, openaiClickable)}
+          ${provCard('moonshot', 'Moonshot', 'Kimi models via API key', moonshotBadges, moonshotActions, p.moonshotReady)}
         </div>
 
         <div id="provider-switch-status" style="font-size:12px;color:var(--muted);min-height:18px"></div>
 
         <!-- Provider model selectors -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px">
           <div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Anthropic Model</div>
             <select id="anthropic-model-sel" class="skill-input" style="width:100%;cursor:pointer"
@@ -2195,6 +2225,13 @@ async function renderSettings() {
             <select id="openai-model-sel" class="skill-input" style="width:100%;cursor:pointer"
                     onchange="saveModel('openai', this.value)">
               ${modelOpts(openaiModels, p.model)}
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Moonshot Model</div>
+            <select id="moonshot-model-sel" class="skill-input" style="width:100%;cursor:pointer"
+                    onchange="saveModel('moonshot', this.value)">
+              ${modelOpts(moonshotModels, p.model)}
             </select>
           </div>
         </div>
@@ -2217,15 +2254,15 @@ async function renderSettings() {
   `;
 }
 
-async function saveAnthropicApiKey() {
-  const input = document.getElementById('anthropic-key-input');
+async function saveProviderApiKey(provider, inputId) {
+  const input = document.getElementById(inputId);
   const key = input.value.trim();
   if (!key) return;
-  const res = await put('/api/provider/apikey', { key });
+  const res = await put('/api/provider/apikey', { key, provider });
   if (res && res.ok) {
     input.value = '';
     const st = document.getElementById('provider-switch-status');
-    st.textContent = 'Anthropic API key saved.';
+    st.textContent = `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved.`;
     st.style.color = 'var(--green)';
     setTimeout(() => renderSettings(), 800);
   }
@@ -2631,7 +2668,7 @@ async function createNewSkill() {
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────
-const AGENT_PROVIDERS = ['anthropic', 'openai'];
+const AGENT_PROVIDERS = ['anthropic', 'openai', 'moonshot'];
 
 async function renderAgents() {
   const agents = await get('/api/agents');
@@ -2746,6 +2783,7 @@ function showNewAgentModal() {
           <option value="">Global default</option>
           <option value="anthropic">anthropic</option>
           <option value="openai">openai</option>
+          <option value="moonshot">moonshot</option>
         </select>
       </div>
       <div class="skill-field">
