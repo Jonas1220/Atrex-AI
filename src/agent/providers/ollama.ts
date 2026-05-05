@@ -1,6 +1,8 @@
 // Ollama provider adapter — local/self-hosted LLM running via Ollama.
-// Uses the OpenAI-compatible API at OLLAMA_BASE_URL/v1 (default: http://localhost:11434/v1).
-// No API key required.
+// Two connection modes:
+//   url    — connects to OLLAMA_BASE_URL (default localhost:11434), no auth
+//   apikey — connects to OLLAMA_BASE_URL with OLLAMA_API_KEY in the Authorization header
+// Mode is auto-detected from which env vars are set, or set explicitly via OLLAMA_MODE.
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type {
@@ -12,9 +14,17 @@ import type {
 import { getActiveModel } from ".";
 import { log } from "../../logger";
 
+export function getOllamaMode(): "apikey" | "url" {
+  const explicit = process.env.OLLAMA_MODE;
+  if (explicit === "apikey" || explicit === "url") return explicit;
+  return process.env.OLLAMA_API_KEY ? "apikey" : "url";
+}
+
 export function getOllamaBaseUrl(): string {
-  const url = (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434").replace(/\/$/, "");
-  return url.endsWith("/v1") ? url : `${url}/v1`;
+  const raw = (process.env.OLLAMA_BASE_URL ?? "").replace(/\/$/, "");
+  const base = raw || (getOllamaMode() === "url" ? "http://localhost:11434" : "");
+  if (!base) return "";
+  return base.endsWith("/v1") ? base : `${base}/v1`;
 }
 
 // ── Request conversion: Anthropic → OpenAI ────────────────────────────────────
@@ -173,8 +183,10 @@ export async function createMessageOllama(
   params: Anthropic.MessageCreateParamsNonStreaming
 ): Promise<Anthropic.Message> {
   const model   = params.model || getActiveModel();
+  const mode    = getOllamaMode();
   const baseURL = getOllamaBaseUrl();
-  const apiKey  = process.env.OLLAMA_API_KEY || "ollama";
+  if (!baseURL) throw new Error("Ollama: OLLAMA_BASE_URL is required in API key mode. Set it in the dashboard.");
+  const apiKey  = mode === "apikey" ? (process.env.OLLAMA_API_KEY || "ollama") : "ollama";
   const client  = new OpenAI({ apiKey, baseURL });
 
   const systemBlocks = (params.system ?? []) as Anthropic.TextBlockParam[];

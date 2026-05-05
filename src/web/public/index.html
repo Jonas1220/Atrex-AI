@@ -2193,6 +2193,17 @@ async function renderSettings() {
   const ollamaBadges = p.ollamaReady
     ? `<span class="badge badge-ok">Connected</span>`
     : `<span class="badge badge-warn">Not reachable</span>`;
+  const ollamaModeToggle = (p.ollamaHasUrl && p.ollamaApiKeySet) ? `
+    <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
+      <button onclick="setOllamaMode('url')"
+              class="btn btn-sm" style="flex:1;${p.ollamaMode==='url' ? 'background:var(--accent);color:#000;' : 'background:var(--surface-3);color:var(--muted);'}">
+        Local (URL)
+      </button>
+      <button onclick="setOllamaMode('apikey')"
+              class="btn btn-sm" style="flex:1;${p.ollamaMode==='apikey' ? 'background:var(--accent);color:#000;' : 'background:var(--surface-3);color:var(--muted);'}">
+        Hosted (API Key)
+      </button>
+    </div>` : '';
   const ollamaActions = `
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
       <input id="ollama-url-input" type="text" placeholder="http://localhost:11434"
@@ -2206,6 +2217,7 @@ async function renderSettings() {
                     border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
              autocomplete="off" />
       <button class="btn btn-secondary btn-sm" onclick="saveOllamaSettings()">Save</button>
+      ${ollamaModeToggle}
     </div>`;
 
   const openaiClickable = p.openaiReady;
@@ -2294,6 +2306,11 @@ async function saveProviderApiKey(provider) {
     st.style.color = 'var(--green)';
     setTimeout(() => renderSettings(), 800);
   }
+}
+
+async function setOllamaMode(mode) {
+  const res = await put('/api/provider/ollamamode', { mode });
+  if (res && res.ok) renderSettings();
 }
 
 async function saveOllamaSettings() {

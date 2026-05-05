@@ -14,6 +14,7 @@ import { isOpenAIConnected } from "../openai/auth";
 import { createAnthropicRouter } from "../anthropic/oauth";
 import { isAnthropicOAuthConnected } from "../anthropic/auth";
 import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel } from "../agent/providers";
+import { getOllamaMode } from "../agent/providers/ollama";
 import {
   listSkills,
   loadSkill,
@@ -30,16 +31,26 @@ const ROOT = process.cwd();
 const cfgPath = (f: string) => join(ROOT, "config", f);
 const memPath = (f: string) => join(ROOT, "config", f);
 
-function getOllamaBaseUrl(): string {
-  return (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434").replace(/\/$/, "");
+function getRawOllamaUrl(): string {
+  const raw = (process.env.OLLAMA_BASE_URL ?? "").replace(/\/$/, "");
+  return raw || (getOllamaMode() === "url" ? "http://localhost:11434" : "");
 }
 
 async function isOllamaReachable(): Promise<boolean> {
   try {
-    const r = await fetch(`${getOllamaBaseUrl()}/api/tags`, {
-      signal: AbortSignal.timeout(2000),
-    });
-    return r.ok;
+    const mode = getOllamaMode();
+    const rawUrl = getRawOllamaUrl();
+    if (!rawUrl) return false;
+    if (mode === "url") {
+      const r = await fetch(`${rawUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+      return r.ok;
+    } else {
+      const headers: Record<string, string> = {};
+      if (process.env.OLLAMA_API_KEY) headers["Authorization"] = `Bearer ${process.env.OLLAMA_API_KEY}`;
+      const base = rawUrl.endsWith("/v1") ? rawUrl : `${rawUrl}/v1`;
+      const r = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(2000) });
+      return r.ok;
+    }
   } catch {
     return false;
   }
@@ -281,7 +292,9 @@ app.get("/api/provider", async (_req, res) => {
     anthropicOAuth: isAnthropicOAuthConnected(),
     openaiReady:    isOpenAIConnected(),
     ollamaReady:     ollamaOk,
-    ollamaBaseUrl:   process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
+    ollamaMode:      getOllamaMode(),
+    ollamaBaseUrl:   process.env.OLLAMA_BASE_URL ?? "",
+    ollamaHasUrl:    !!process.env.OLLAMA_BASE_URL,
     ollamaApiKeySet: !!process.env.OLLAMA_API_KEY,
   });
 });
@@ -301,7 +314,7 @@ app.post("/api/provider/switch", async (req, res) => {
     return;
   }
   if (provider === "ollama" && !(await isOllamaReachable())) {
-    res.status(400).json({ error: `Ollama is not reachable at ${getOllamaBaseUrl()}. Make sure it's running.` });
+    res.status(400).json({ error: `Ollama is not reachable at ${getRawOllamaUrl()}. Make sure it's running.` });
     return;
   }
 
@@ -358,6 +371,15 @@ app.put("/api/provider/baseurl", (req, res) => {
   updateEnvFile({ OLLAMA_BASE_URL: url });
   process.env.OLLAMA_BASE_URL = url;
   log.info(`OLLAMA_BASE_URL updated to ${url} via web admin.`);
+  res.json({ ok: true });
+});
+
+app.put("/api/provider/ollamamode", (req, res) => {
+  const { mode } = req.body as { mode?: string };
+  if (mode !== "url" && mode !== "apikey") { res.status(400).json({ error: "mode must be 'url' or 'apikey'" }); return; }
+  updateEnvFile({ OLLAMA_MODE: mode });
+  process.env.OLLAMA_MODE = mode;
+  log.info(`OLLAMA_MODE set to ${mode} via web admin.`);
   res.json({ ok: true });
 });
 
@@ -804,12 +826,23 @@ app.get("/api/provider/models", async (req, res) => {
         .sort();
       res.json({ models });
     } else if (provider === "ollama") {
-      const baseUrl = getOllamaBaseUrl();
-      const r = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-      if (!r.ok) { res.json({ models: [] }); return; }
-      const data = await r.json() as { models?: { name: string }[] };
-      const models = (data.models ?? []).map((m: { name: string }) => m.name);
-      res.json({ models });
+      const mode = getOllamaMode();
+      const rawUrl = getRawOllamaUrl();
+      if (!rawUrl) { res.json({ models: [] }); return; }
+      if (mode === "url") {
+        const r = await fetch(`${rawUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+        if (!r.ok) { res.json({ models: [] }); return; }
+        const data = await r.json() as { models?: { name: string }[] };
+        res.json({ models: (data.models ?? []).map((m: { name: string }) => m.name) });
+      } else {
+        const headers: Record<string, string> = {};
+        if (process.env.OLLAMA_API_KEY) headers["Authorization"] = `Bearer ${process.env.OLLAMA_API_KEY}`;
+        const base = rawUrl.endsWith("/v1") ? rawUrl : `${rawUrl}/v1`;
+        const r = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(3000) });
+        if (!r.ok) { res.json({ models: [] }); return; }
+        const data = await r.json() as { data?: { id: string }[] };
+        res.json({ models: (data.data ?? []).map((m: { id: string }) => m.id) });
+      }
     } else {
       res.status(400).json({ error: "unknown provider" });
     }
