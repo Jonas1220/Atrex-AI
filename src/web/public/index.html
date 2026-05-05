@@ -2194,21 +2194,18 @@ async function renderSettings() {
     ? `<span class="badge badge-ok">Connected</span>`
     : `<span class="badge badge-warn">Not reachable</span>`;
   const ollamaActions = `
-    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
-      <input id="ollama-url-input" type="text" placeholder="${escHtml(p.ollamaBaseUrl || 'http://localhost:11434')}"
-             value="${escHtml(p.ollamaBaseUrl || 'http://localhost:11434')}"
-             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="ollama-url-input" type="text" placeholder="http://localhost:11434"
+             value="${escHtml(p.ollamaBaseUrl || '')}"
+             style="padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
                     border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
              autocomplete="off" />
-      <button class="btn btn-secondary btn-sm" onclick="saveOllamaUrl()">Save</button>
-    </div>
-    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
       <input id="ollama-key-input" type="password"
              placeholder="${p.ollamaApiKeySet ? 'Update API key…' : 'API key (optional)'}"
-             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+             style="padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
                     border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
              autocomplete="off" />
-      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('ollama')">Save</button>
+      <button class="btn btn-secondary btn-sm" onclick="saveOllamaSettings()">Save</button>
     </div>`;
 
   const openaiClickable = p.openaiReady;
@@ -2299,14 +2296,17 @@ async function saveProviderApiKey(provider) {
   }
 }
 
-async function saveOllamaUrl() {
-  const input = document.getElementById('ollama-url-input');
-  const url = input?.value.trim();
-  if (!url) return;
-  const res = await put('/api/provider/baseurl', { provider: 'ollama', url });
-  if (res && res.ok) {
-    const st = document.getElementById('provider-switch-status');
-    st.textContent = 'Ollama URL saved.';
+async function saveOllamaSettings() {
+  const url = document.getElementById('ollama-url-input')?.value.trim();
+  const key = document.getElementById('ollama-key-input')?.value.trim();
+  if (!url && !key) return;
+  const saves = [];
+  if (url) saves.push(put('/api/provider/baseurl', { provider: 'ollama', url }));
+  if (key) saves.push(put('/api/provider/apikey', { provider: 'ollama', key }));
+  const results = await Promise.all(saves);
+  const st = document.getElementById('provider-switch-status');
+  if (results.every(r => r && r.ok)) {
+    st.textContent = 'Ollama settings saved.';
     st.style.color = 'var(--green)';
     setTimeout(() => renderSettings(), 800);
   }
