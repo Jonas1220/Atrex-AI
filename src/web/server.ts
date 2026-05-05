@@ -11,7 +11,7 @@ import { createOAuthRouter } from "../google/oauth";
 import { isGoogleConnected } from "../google/auth";
 import { createOpenAIRouter } from "../openai/oauth";
 import { isOpenAIConnected } from "../openai/auth";
-import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel, isMoonshotConnected } from "../agent/providers";
+import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel, isMoonshotConnected, isOllamaConnected } from "../agent/providers";
 import {
   listSkills,
   loadSkill,
@@ -160,17 +160,19 @@ ensureMainSkill();
 // ── Setup endpoints (always accessible — registered before auth middleware) ──
 app.get("/setup/status", (_req, res) => {
   const moonshot = isMoonshotConnected();
+  const ollama   = isOllamaConnected();
   res.json({
-    needsSetup: !process.env.TELEGRAM_BOT_TOKEN || (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !moonshot),
+    needsSetup: !process.env.TELEGRAM_BOT_TOKEN || (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && !moonshot && !ollama),
     telegram:  !!process.env.TELEGRAM_BOT_TOKEN,
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai:    isOpenAIConnected(),
     moonshot,
+    ollama,
   });
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, moonshotKey, provider, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, moonshotKey, ollamaUrl, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
   if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
@@ -179,11 +181,12 @@ app.put("/setup/core", (req, res) => {
   if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
     updateEnvFile(updates);
-    if (provider && ["anthropic", "openai", "moonshot"].includes(provider)) {
+    if (provider && ["anthropic", "openai", "moonshot", "ollama"].includes(provider)) {
       const defaultModels: Record<string, string> = {
         anthropic: "claude-sonnet-4-6",
         openai:    "gpt-4o",
         moonshot:  "kimi-k2.6",
+        ollama:    "",
       };
       let cfg: Record<string, unknown> = {};
       try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -196,6 +199,11 @@ app.put("/setup/core", (req, res) => {
     if (moonshotKey) {
       updateEnvFile({ MOONSHOT_API_KEY: moonshotKey });
       process.env.MOONSHOT_API_KEY = moonshotKey;
+    }
+    if (ollamaUrl) {
+      const url = ollamaUrl.trim().replace(/\/$/, "");
+      updateEnvFile({ OLLAMA_BASE_URL: url });
+      process.env.OLLAMA_BASE_URL = url;
     }
     log.info("Core credentials saved via setup wizard.");
     res.json({ ok: true });
@@ -260,13 +268,15 @@ app.get("/api/provider", (_req, res) => {
     anthropicReady: !!process.env.ANTHROPIC_API_KEY,
     openaiReady:    isOpenAIConnected(),
     moonshotReady:  isMoonshotConnected(),
+    ollamaReady:    isOllamaConnected(),
+    ollamaUrl:      process.env.OLLAMA_BASE_URL ?? "",
   });
 });
 
 app.post("/api/provider/switch", (req, res) => {
   const { provider } = req.body as { provider?: string };
-  if (!["anthropic", "openai", "moonshot"].includes(provider ?? "")) {
-    res.status(400).json({ error: "provider must be 'anthropic', 'openai', or 'moonshot'" });
+  if (!["anthropic", "openai", "moonshot", "ollama"].includes(provider ?? "")) {
+    res.status(400).json({ error: "unknown provider" });
     return;
   }
   if (provider === "openai" && !isOpenAIConnected()) {
@@ -281,8 +291,12 @@ app.post("/api/provider/switch", (req, res) => {
     res.status(400).json({ error: "Moonshot API key not set." });
     return;
   }
+  if (provider === "ollama" && !isOllamaConnected()) {
+    res.status(400).json({ error: "Ollama URL not configured." });
+    return;
+  }
 
-  setRuntimeProvider(provider as "anthropic" | "openai" | "moonshot");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "moonshot" | "ollama");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -296,12 +310,12 @@ app.post("/api/provider/switch", (req, res) => {
 app.post("/api/provider/model", (req, res) => {
   const { provider, model } = req.body as { provider?: string; model?: string };
   if (!provider || !model) { res.status(400).json({ error: "provider and model required" }); return; }
-  if (!["anthropic", "openai", "moonshot"].includes(provider)) {
+  if (!["anthropic", "openai", "moonshot", "ollama"].includes(provider)) {
     res.status(400).json({ error: "unknown provider" }); return;
   }
 
   setRuntimeModel(model);
-  setRuntimeProvider(provider as "anthropic" | "openai" | "moonshot");
+  setRuntimeProvider(provider as "anthropic" | "openai" | "moonshot" | "ollama");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -327,6 +341,16 @@ app.put("/api/provider/apikey", (req, res) => {
   } else {
     res.status(400).json({ error: "unknown provider" }); return;
   }
+  res.json({ ok: true });
+});
+
+app.put("/api/provider/ollamaurl", (req, res) => {
+  const { url } = req.body as { url?: string };
+  if (!url) { res.status(400).json({ error: "url required" }); return; }
+  const clean = url.trim().replace(/\/$/, "");
+  updateEnvFile({ OLLAMA_BASE_URL: clean });
+  process.env.OLLAMA_BASE_URL = clean;
+  log.info("OLLAMA_BASE_URL updated via web admin.");
   res.json({ ok: true });
 });
 
@@ -771,6 +795,13 @@ app.get("/api/provider/models", async (req, res) => {
         .map((m: { id: string }) => m.id)
         .filter((id: string) => id.startsWith("gpt-") || /^o\d/.test(id) || id.startsWith("codex"))
         .sort();
+      res.json({ models });
+    } else if (provider === "ollama") {
+      const baseUrl = process.env.OLLAMA_BASE_URL;
+      if (!baseUrl) { res.json({ models: [] }); return; }
+      const r = await fetch(`${baseUrl}/api/tags`);
+      const data = await r.json() as { models?: { name: string }[] };
+      const models = (data.models ?? []).map((m: { name: string }) => m.name).sort();
       res.json({ models });
     } else if (provider === "moonshot") {
       const key = process.env.MOONSHOT_API_KEY;

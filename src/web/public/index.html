@@ -920,7 +920,7 @@
 
       <div class="wizard-field">
         <div class="wizard-label">AI Provider <span class="wizard-req">*</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
           <button id="wprov-anthropic" onclick="selectWizardProvider('anthropic')"
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--amber);background:var(--amber-dim);color:var(--amber);cursor:pointer;transition:all 0.15s">
             Anthropic
@@ -932,6 +932,10 @@
           <button id="wprov-moonshot" onclick="selectWizardProvider('moonshot')"
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
             Moonshot
+          </button>
+          <button id="wprov-ollama" onclick="selectWizardProvider('ollama')"
+            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
+            Ollama
           </button>
         </div>
         <div id="wprov-fields-anthropic">
@@ -952,6 +956,13 @@
                  placeholder="sk-…" autocomplete="off" />
           <div class="wizard-hint" style="margin-top:8px">
             Get yours at <strong>platform.kimi.ai</strong> → API Keys.
+          </div>
+        </div>
+        <div id="wprov-fields-ollama" style="display:none">
+          <input id="w-ollama-url" class="wizard-input" type="text"
+                 placeholder="http://localhost:11434" autocomplete="off" />
+          <div class="wizard-hint" style="margin-top:8px">
+            URL of your local Ollama instance. No API key needed.
           </div>
         </div>
       </div>
@@ -1285,7 +1296,7 @@ let _wizardProvider = 'anthropic';
 
 function selectWizardProvider(p) {
   _wizardProvider = p;
-  ['anthropic', 'openai', 'moonshot'].forEach(id => {
+  ['anthropic', 'openai', 'moonshot', 'ollama'].forEach(id => {
     const btn = document.getElementById(`wprov-${id}`);
     const fields = document.getElementById(`wprov-fields-${id}`);
     const active = id === p;
@@ -1304,11 +1315,17 @@ async function wizardSaveCore() {
 
   const anth     = document.getElementById('w-anth-key')?.value.trim()     || '';
   const moonshot = document.getElementById('w-moonshot-key')?.value.trim() || '';
+  const ollama   = document.getElementById('w-ollama-url')?.value.trim()   || '';
 
-  const noKeyNeeded = _wizardProvider === 'openai';
+  const noKeyNeeded = _wizardProvider === 'openai' || _wizardProvider === 'ollama';
   const hasKey = noKeyNeeded || anth || moonshot;
   if (!tg || !hasKey) {
     errEl.textContent = 'Telegram Bot Token and an AI Provider API Key are required.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (_wizardProvider === 'ollama' && !ollama) {
+    errEl.textContent = 'Please enter the Ollama URL.';
     errEl.classList.remove('hidden');
     return;
   }
@@ -1319,8 +1336,9 @@ async function wizardSaveCore() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       telegramToken: tg,
-      ...(anth     ? { anthropicKey: anth }     : {}),
-      ...(moonshot ? { moonshotKey: moonshot }   : {}),
+      ...(anth     ? { anthropicKey: anth }   : {}),
+      ...(moonshot ? { moonshotKey: moonshot } : {}),
+      ...(ollama   ? { ollamaUrl: ollama }     : {}),
       provider: _wizardProvider,
       allowedUserIds: ids,
       adminToken: adm,
@@ -2108,18 +2126,19 @@ async function deleteSecretKey(key) {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 async function renderSettings() {
-  const [data, prov, anthropicList, openaiList, moonshotList] = await Promise.all([
+  const [data, prov, anthropicList, openaiList, moonshotList, ollamaList] = await Promise.all([
     get('/api/settings'),
     get('/api/provider'),
     get('/api/provider/models?provider=anthropic').catch(() => null),
     get('/api/provider/models?provider=openai').catch(() => null),
     get('/api/provider/models?provider=moonshot').catch(() => null),
+    get('/api/provider/models?provider=ollama').catch(() => null),
   ]);
   if (!data) return;
 
   const p = prov || {
     active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
-    anthropicReady: false, openaiReady: false, moonshotReady: false,
+    anthropicReady: false, openaiReady: false, moonshotReady: false, ollamaReady: false, ollamaUrl: '',
   };
 
   const fallbackAnthropic = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'];
@@ -2132,6 +2151,7 @@ async function renderSettings() {
     .map(id => ({ id, label: id }));
   const moonshotModels  = (moonshotList?.models?.length ? moonshotList.models : fallbackMoonshot)
     .map(id => ({ id, label: id }));
+  const ollamaModels    = (ollamaList?.models ?? []).map(id => ({ id, label: id }));
 
   const modelOpts = (models, current) => {
     const opts = models.map(m =>
@@ -2192,6 +2212,18 @@ async function renderSettings() {
       <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('moonshot', 'moonshot-key-input')">Save</button>
     </div>`;
 
+  const ollamaBadges = p.ollamaReady
+    ? `<span class="badge badge-ok">URL set</span>`
+    : `<span class="badge badge-warn">No URL</span>`;
+  const ollamaActions = `
+    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="ollama-url-input" type="text" placeholder="${p.ollamaUrl || 'http://localhost:11434'}"
+             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
+             autocomplete="off" />
+      <button class="btn btn-secondary btn-sm" onclick="saveOllamaUrl()">Save</button>
+    </div>`;
+
   const el = document.getElementById('content');
   el.innerHTML = `
     <div class="page-enter" style="display:flex;flex-direction:column;gap:14px">
@@ -2203,16 +2235,17 @@ async function renderSettings() {
           Click a provider to make it active. API keys and model selection are saved immediately.
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
           ${provCard('anthropic', 'Anthropic', 'Claude models via API key', anthropicBadges, anthropicActions, true)}
           ${provCard('openai', 'OpenAI', 'GPT models via ChatGPT account', '', openaiActions, openaiClickable)}
           ${provCard('moonshot', 'Moonshot', 'Kimi models via API key', moonshotBadges, moonshotActions, p.moonshotReady)}
+          ${provCard('ollama', 'Ollama', 'Local models via Ollama', ollamaBadges, ollamaActions, p.ollamaReady)}
         </div>
 
         <div id="provider-switch-status" style="font-size:12px;color:var(--muted);min-height:18px"></div>
 
         <!-- Provider model selectors -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
           <div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Anthropic Model</div>
             <select id="anthropic-model-sel" class="skill-input" style="width:100%;cursor:pointer"
@@ -2233,6 +2266,17 @@ async function renderSettings() {
                     onchange="saveModel('moonshot', this.value)">
               ${modelOpts(moonshotModels, p.model)}
             </select>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Ollama Model</div>
+            ${ollamaModels.length > 0
+              ? `<select id="ollama-model-sel" class="skill-input" style="width:100%;cursor:pointer"
+                         onchange="saveModel('ollama', this.value)">
+                   ${modelOpts(ollamaModels, p.model)}
+                 </select>`
+              : `<input id="ollama-model-input" class="skill-input" style="width:100%" placeholder="e.g. llama3.2 (type model name)"
+                        onchange="saveModel('ollama', this.value)" />`
+            }
           </div>
         </div>
       </div>
@@ -2263,6 +2307,20 @@ async function saveProviderApiKey(provider, inputId) {
     input.value = '';
     const st = document.getElementById('provider-switch-status');
     st.textContent = `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved.`;
+    st.style.color = 'var(--green)';
+    setTimeout(() => renderSettings(), 800);
+  }
+}
+
+async function saveOllamaUrl() {
+  const input = document.getElementById('ollama-url-input');
+  const url = input.value.trim();
+  if (!url) return;
+  const res = await put('/api/provider/ollamaurl', { url });
+  if (res && res.ok) {
+    input.value = '';
+    const st = document.getElementById('provider-switch-status');
+    st.textContent = 'Ollama URL saved.';
     st.style.color = 'var(--green)';
     setTimeout(() => renderSettings(), 800);
   }
@@ -2668,7 +2726,7 @@ async function createNewSkill() {
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────
-const AGENT_PROVIDERS = ['anthropic', 'openai', 'moonshot'];
+const AGENT_PROVIDERS = ['anthropic', 'openai', 'moonshot', 'ollama'];
 
 async function renderAgents() {
   const agents = await get('/api/agents');
@@ -2784,6 +2842,7 @@ function showNewAgentModal() {
           <option value="anthropic">anthropic</option>
           <option value="openai">openai</option>
           <option value="moonshot">moonshot</option>
+          <option value="ollama">ollama</option>
         </select>
       </div>
       <div class="skill-field">
