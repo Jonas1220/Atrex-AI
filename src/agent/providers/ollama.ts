@@ -174,7 +174,8 @@ export async function createMessageOllama(
 ): Promise<Anthropic.Message> {
   const model   = params.model || getActiveModel();
   const baseURL = getOllamaBaseUrl();
-  const client  = new OpenAI({ apiKey: "ollama", baseURL });
+  const apiKey  = process.env.OLLAMA_API_KEY || "ollama";
+  const client  = new OpenAI({ apiKey, baseURL });
 
   const systemBlocks = (params.system ?? []) as Anthropic.TextBlockParam[];
   const systemStr    = systemText(systemBlocks);

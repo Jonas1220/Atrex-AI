@@ -189,12 +189,13 @@ app.get("/setup/status", async (_req, res) => {
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, ollamaUrl, provider, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, ollamaUrl, ollamaApiKey, ollamaModel, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
   if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
   if (anthropicKey)                 updates["ANTHROPIC_API_KEY"]  = anthropicKey;
   if (ollamaUrl)                    updates["OLLAMA_BASE_URL"]     = ollamaUrl;
+  if (ollamaApiKey)                 updates["OLLAMA_API_KEY"]      = ollamaApiKey;
   if (allowedUserIds !== undefined) updates["ALLOWED_USER_IDS"]   = allowedUserIds;
   if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
@@ -208,7 +209,9 @@ app.put("/setup/core", (req, res) => {
       let cfg: Record<string, unknown> = {};
       try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
       cfg.provider = provider;
-      if (!cfg.model || cfg.model === "claude-sonnet-4-6" && provider !== "anthropic") {
+      if (provider === "ollama" && ollamaModel) {
+        cfg.model = ollamaModel;
+      } else if (!cfg.model || cfg.model === "claude-sonnet-4-6" && provider !== "anthropic") {
         cfg.model = defaultModels[provider];
       }
       writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
@@ -277,8 +280,9 @@ app.get("/api/provider", async (_req, res) => {
     anthropicReady: !!process.env.ANTHROPIC_API_KEY,
     anthropicOAuth: isAnthropicOAuthConnected(),
     openaiReady:    isOpenAIConnected(),
-    ollamaReady:    ollamaOk,
-    ollamaBaseUrl:  getOllamaBaseUrl(),
+    ollamaReady:     ollamaOk,
+    ollamaBaseUrl:   getOllamaBaseUrl(),
+    ollamaApiKeySet: !!process.env.OLLAMA_API_KEY,
   });
 });
 
@@ -339,7 +343,8 @@ app.put("/api/provider/apikey", (req, res) => {
   if (!provider || !key) { res.status(400).json({ error: "provider and key required" }); return; }
   let envKey: string;
   if (provider === "anthropic")      envKey = "ANTHROPIC_API_KEY";
-  else { res.status(400).json({ error: "API keys can only be set for anthropic" }); return; }
+  else if (provider === "ollama")    envKey = "OLLAMA_API_KEY";
+  else { res.status(400).json({ error: "API keys can only be set for anthropic and ollama" }); return; }
   updateEnvFile({ [envKey]: key });
   process.env[envKey] = key;
   log.info(`${envKey} updated via web admin.`);

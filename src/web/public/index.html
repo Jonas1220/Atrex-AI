@@ -950,9 +950,15 @@
         <div id="wprov-fields-ollama" style="display:none">
           <input id="w-ollama-url" class="wizard-input" type="text"
                  placeholder="http://localhost:11434" value="http://localhost:11434" autocomplete="off" />
+          <input id="w-ollama-apikey" class="wizard-input" type="password"
+                 placeholder="API key (optional — for hosted services)" autocomplete="off"
+                 style="margin-top:8px" />
+          <input id="w-ollama-model" class="wizard-input" type="text"
+                 placeholder="Model (e.g. llama3.2)" value="llama3.2" autocomplete="off"
+                 style="margin-top:8px" />
           <div class="wizard-hint" style="margin-top:8px">
-            Base URL for your Ollama server. <strong>No API key needed.</strong>
-            Make sure Ollama is running before continuing.
+            <strong>IP/URL</strong> for local Ollama. Add an <strong>API key</strong> for hosted services.
+            Enter any model name available on your instance.
           </div>
         </div>
       </div>
@@ -1321,7 +1327,11 @@ async function wizardSaveCore() {
     body: JSON.stringify({
       telegramToken: tg,
       ...(anth      ? { anthropicKey: anth }        : {}),
-      ...(_wizardProvider === 'ollama' ? { ollamaUrl } : {}),
+      ...(_wizardProvider === 'ollama' ? {
+        ollamaUrl,
+        ...(document.getElementById('w-ollama-apikey')?.value.trim() ? { ollamaApiKey: document.getElementById('w-ollama-apikey').value.trim() } : {}),
+        ollamaModel: document.getElementById('w-ollama-model')?.value.trim() || 'llama3.2',
+      } : {}),
       provider: _wizardProvider,
       allowedUserIds: ids,
       adminToken: adm,
@@ -2121,7 +2131,7 @@ async function renderSettings() {
   const p = prov || {
     active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
     anthropicReady: false, anthropicOAuth: false, openaiReady: false,
-    ollamaReady: false, ollamaBaseUrl: 'http://localhost:11434',
+    ollamaReady: false, ollamaBaseUrl: 'http://localhost:11434', ollamaApiKeySet: false,
   };
 
   // Fallback lists used when API fetch fails or key isn't set yet
@@ -2191,6 +2201,14 @@ async function renderSettings() {
                     border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
              autocomplete="off" />
       <button class="btn btn-secondary btn-sm" onclick="saveOllamaUrl()">Save</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
+      <input id="ollama-key-input" type="password"
+             placeholder="${p.ollamaApiKeySet ? 'Update API key…' : 'API key (optional)'}"
+             style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
+                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
+             autocomplete="off" />
+      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('ollama')">Save</button>
     </div>`;
 
   const openaiClickable = p.openaiReady;
@@ -2238,10 +2256,14 @@ async function renderSettings() {
           </div>
           <div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Ollama Model</div>
-            <select id="ollama-model-sel" class="skill-input" style="width:100%;cursor:pointer"
-                    onchange="saveModel('ollama', this.value)">
-              ${modelOpts(ollamaModels, p.model)}
-            </select>
+            <div style="display:flex;gap:6px">
+              <input id="ollama-model-input" type="text"
+                     value="${escHtml(p.active === 'ollama' ? p.model : '')}"
+                     placeholder="e.g. llama3.2"
+                     class="skill-input" style="flex:1" autocomplete="off" />
+              <button class="btn btn-secondary btn-sm"
+                      onclick="saveModel('ollama', document.getElementById('ollama-model-input').value.trim())">Save</button>
+            </div>
           </div>
         </div>
       </div>
