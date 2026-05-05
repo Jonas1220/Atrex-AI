@@ -929,10 +929,6 @@
             style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
             OpenAI
           </button>
-          <button id="wprov-ollama" onclick="selectWizardProvider('ollama')"
-            style="padding:9px 0;font-size:12px;font-weight:600;border-radius:6px;border:1px solid var(--border-2);background:transparent;color:var(--text-2);cursor:pointer;transition:all 0.15s">
-            Ollama
-          </button>
         </div>
         <div id="wprov-fields-anthropic">
           <input id="w-anth-key" class="wizard-input" type="password"
@@ -945,20 +941,6 @@
           <div class="wizard-hint" style="margin-bottom:0;padding:12px;background:var(--surface-2);border-radius:6px;border:1px solid var(--border)">
             OpenAI uses OAuth — no API key needed here.<br>
             Connect your ChatGPT account from the Settings page after setup.
-          </div>
-        </div>
-        <div id="wprov-fields-ollama" style="display:none">
-          <input id="w-ollama-url" class="wizard-input" type="text"
-                 placeholder="http://localhost:11434" value="http://localhost:11434" autocomplete="off" />
-          <input id="w-ollama-apikey" class="wizard-input" type="password"
-                 placeholder="API key (optional — for hosted services)" autocomplete="off"
-                 style="margin-top:8px" />
-          <input id="w-ollama-model" class="wizard-input" type="text"
-                 placeholder="Model (e.g. llama3.2)" value="llama3.2" autocomplete="off"
-                 style="margin-top:8px" />
-          <div class="wizard-hint" style="margin-top:8px">
-            <strong>IP/URL</strong> for local Ollama. Add an <strong>API key</strong> for hosted services.
-            Enter any model name available on your instance.
           </div>
         </div>
       </div>
@@ -1292,7 +1274,7 @@ let _wizardProvider = 'anthropic';
 
 function selectWizardProvider(p) {
   _wizardProvider = p;
-  ['anthropic', 'openai', 'ollama'].forEach(id => {
+  ['anthropic', 'openai'].forEach(id => {
     const btn = document.getElementById(`wprov-${id}`);
     const fields = document.getElementById(`wprov-fields-${id}`);
     const active = id === p;
@@ -1309,10 +1291,9 @@ async function wizardSaveCore() {
   const adm   = document.getElementById('w-admin-token').value.trim();
   const errEl = document.getElementById('w-core-err');
 
-  const anth      = document.getElementById('w-anth-key')?.value.trim() || '';
-  const ollamaUrl = document.getElementById('w-ollama-url')?.value.trim() || 'http://localhost:11434';
+  const anth = document.getElementById('w-anth-key')?.value.trim() || '';
 
-  const noKeyNeeded = _wizardProvider === 'openai' || _wizardProvider === 'ollama';
+  const noKeyNeeded = _wizardProvider === 'openai';
   const hasKey = noKeyNeeded || anth;
   if (!tg || !hasKey) {
     errEl.textContent = 'Telegram Bot Token and Anthropic API Key are required.';
@@ -1326,12 +1307,7 @@ async function wizardSaveCore() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       telegramToken: tg,
-      ...(anth      ? { anthropicKey: anth }        : {}),
-      ...(_wizardProvider === 'ollama' ? {
-        ollamaUrl,
-        ...(document.getElementById('w-ollama-apikey')?.value.trim() ? { ollamaApiKey: document.getElementById('w-ollama-apikey').value.trim() } : {}),
-        ollamaModel: document.getElementById('w-ollama-model')?.value.trim() || 'llama3.2',
-      } : {}),
+      ...(anth ? { anthropicKey: anth } : {}),
       provider: _wizardProvider,
       allowedUserIds: ids,
       adminToken: adm,
@@ -2119,31 +2095,25 @@ async function deleteSecretKey(key) {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 async function renderSettings() {
-  const [data, prov, anthropicList, openaiList, ollamaList] = await Promise.all([
+  const [data, prov, anthropicList, openaiList] = await Promise.all([
     get('/api/settings'),
     get('/api/provider'),
     get('/api/provider/models?provider=anthropic').catch(() => null),
     get('/api/provider/models?provider=openai').catch(() => null),
-    get('/api/provider/models?provider=ollama').catch(() => null),
   ]);
   if (!data) return;
 
   const p = prov || {
     active: 'anthropic', default: 'anthropic', model: 'claude-sonnet-4-6',
-    anthropicReady: false, anthropicOAuth: false, openaiReady: false,
-    ollamaReady: false, ollamaBaseUrl: 'http://localhost:11434', ollamaApiKeySet: false,
+    anthropicReady: false, openaiReady: false,
   };
 
-  // Fallback lists used when API fetch fails or key isn't set yet
   const fallbackAnthropic = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'];
   const fallbackOpenAI    = ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'];
-  const fallbackOllama    = ['llama3.2', 'llama3.1', 'mistral', 'codellama'];
 
   const anthropicModels = (anthropicList?.models?.length ? anthropicList.models : fallbackAnthropic)
     .map(id => ({ id, label: id }));
   const openaiModels    = (openaiList?.models?.length ? openaiList.models : fallbackOpenAI)
-    .map(id => ({ id, label: id }));
-  const ollamaModels    = (ollamaList?.models?.length ? ollamaList.models : fallbackOllama)
     .map(id => ({ id, label: id }));
 
   const modelOpts = (models, current) => {
@@ -2177,47 +2147,12 @@ async function renderSettings() {
     ? `<span class="badge badge-ok">API key set</span>`
     : `<span class="badge badge-warn">No API key</span>`;
   const anthropicActions = `
-    ${p.anthropicOAuth
-      ? `<span class="badge badge-ok">Claude account connected</span>
-         <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();disconnectAnthropic()" style="font-size:10px">Disconnect account</button>`
-      : `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();importAnthropicCLI()">Connect Claude account ›</button>`}
     <div style="display:flex;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
       <input id="anthropic-key-input" type="password" placeholder="Update API key…"
              style="flex:1;padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
                     border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
              autocomplete="off" />
-      <button class="btn btn-secondary btn-sm" onclick="saveProviderApiKey('anthropic')">Save</button>
-    </div>`;
-
-  const ollamaClickable = p.ollamaReady;
-  const ollamaBadges = p.ollamaReady
-    ? `<span class="badge badge-ok">Connected</span>`
-    : `<span class="badge badge-warn">Not reachable</span>`;
-  const ollamaModeToggle = (p.ollamaHasUrl && p.ollamaApiKeySet) ? `
-    <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
-      <button onclick="setOllamaMode('url')"
-              class="btn btn-sm" style="flex:1;${p.ollamaMode==='url' ? 'background:var(--accent);color:#000;' : 'background:var(--surface-3);color:var(--muted);'}">
-        Local (URL)
-      </button>
-      <button onclick="setOllamaMode('apikey')"
-              class="btn btn-sm" style="flex:1;${p.ollamaMode==='apikey' ? 'background:var(--accent);color:#000;' : 'background:var(--surface-3);color:var(--muted);'}">
-        Hosted (API Key)
-      </button>
-    </div>` : '';
-  const ollamaActions = `
-    <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px" onclick="event.stopPropagation()">
-      <input id="ollama-url-input" type="text" placeholder="http://localhost:11434"
-             value="${escHtml(p.ollamaBaseUrl || '')}"
-             style="padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
-                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
-             autocomplete="off" />
-      <input id="ollama-key-input" type="password"
-             placeholder="${p.ollamaApiKeySet ? 'Update API key…' : 'API key (optional)'}"
-             style="padding:7px 10px;background:var(--surface-3);border:1px solid var(--border-2);
-                    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none"
-             autocomplete="off" />
-      <button class="btn btn-secondary btn-sm" onclick="saveOllamaSettings()">Save</button>
-      ${ollamaModeToggle}
+      <button class="btn btn-secondary btn-sm" onclick="saveAnthropicApiKey()">Save</button>
     </div>`;
 
   const openaiClickable = p.openaiReady;
@@ -2240,9 +2175,8 @@ async function renderSettings() {
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-          ${provCard('anthropic', 'Anthropic', 'Claude models', anthropicBadges, anthropicActions, true)}
+          ${provCard('anthropic', 'Anthropic', 'Claude models via API key', anthropicBadges, anthropicActions, true)}
           ${provCard('openai', 'OpenAI', 'GPT models via ChatGPT account', '', openaiActions, openaiClickable)}
-          ${provCard('ollama', 'Ollama', 'Local models — no API key needed', ollamaBadges, ollamaActions, ollamaClickable)}
         </div>
 
         <div id="provider-switch-status" style="font-size:12px;color:var(--muted);min-height:18px"></div>
@@ -2262,17 +2196,6 @@ async function renderSettings() {
                     onchange="saveModel('openai', this.value)">
               ${modelOpts(openaiModels, p.model)}
             </select>
-          </div>
-          <div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase">Ollama Model</div>
-            <div style="display:flex;gap:6px">
-              <input id="ollama-model-input" type="text"
-                     value="${escHtml(p.active === 'ollama' ? p.model : '')}"
-                     placeholder="e.g. llama3.2"
-                     class="skill-input" style="flex:1" autocomplete="off" />
-              <button class="btn btn-secondary btn-sm"
-                      onclick="saveModel('ollama', document.getElementById('ollama-model-input').value.trim())">Save</button>
-            </div>
           </div>
         </div>
       </div>
@@ -2294,36 +2217,15 @@ async function renderSettings() {
   `;
 }
 
-async function saveProviderApiKey(provider) {
-  const input = document.getElementById(`${provider}-key-input`);
+async function saveAnthropicApiKey() {
+  const input = document.getElementById('anthropic-key-input');
   const key = input.value.trim();
   if (!key) return;
-  const res = await put('/api/provider/apikey', { provider, key });
+  const res = await put('/api/provider/apikey', { key });
   if (res && res.ok) {
     input.value = '';
     const st = document.getElementById('provider-switch-status');
-    st.textContent = `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved.`;
-    st.style.color = 'var(--green)';
-    setTimeout(() => renderSettings(), 800);
-  }
-}
-
-async function setOllamaMode(mode) {
-  const res = await put('/api/provider/ollamamode', { mode });
-  if (res && res.ok) renderSettings();
-}
-
-async function saveOllamaSettings() {
-  const url = document.getElementById('ollama-url-input')?.value.trim();
-  const key = document.getElementById('ollama-key-input')?.value.trim();
-  if (!url && !key) return;
-  const saves = [];
-  if (url) saves.push(put('/api/provider/baseurl', { provider: 'ollama', url }));
-  if (key) saves.push(put('/api/provider/apikey', { provider: 'ollama', key }));
-  const results = await Promise.all(saves);
-  const st = document.getElementById('provider-switch-status');
-  if (results.every(r => r && r.ok)) {
-    st.textContent = 'Ollama settings saved.';
+    st.textContent = 'Anthropic API key saved.';
     st.style.color = 'var(--green)';
     setTimeout(() => renderSettings(), 800);
   }
@@ -2529,53 +2431,7 @@ async function disconnectOpenAI() {
 }
 
 // ── Anthropic CLI import ──────────────────────────────────────────────────────
-async function importAnthropicCLI() {
-  const modal = document.createElement('div');
-  modal.className = 'skill-modal-bg';
-  modal.id = 'anthropic-connect-modal';
-  modal.innerHTML = `
-    <div class="skill-modal" style="max-width:440px">
-      <div class="skill-modal-title">Connect Anthropic</div>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.6">
-        This will read your existing <strong>Claude Code CLI</strong> credentials
-        from the system keychain and store them here. No new login is needed.
-      </p>
-      <div id="anthropic-import-status" style="font-size:13px;min-height:20px;margin-bottom:16px"></div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn btn-secondary" onclick="closeAnthropicModal()">Cancel</button>
-        <button class="btn btn-primary" id="anthropic-import-btn" onclick="doAnthropicImport()">Import Credentials</button>
-      </div>
-    </div>
-  `;
-  modal.addEventListener('click', e => { if (e.target === modal) closeAnthropicModal(); });
-  document.body.appendChild(modal);
-}
 
-async function doAnthropicImport() {
-  const statusEl = document.getElementById('anthropic-import-status');
-  const btn = document.getElementById('anthropic-import-btn');
-  statusEl.innerHTML = '<span style="color:var(--muted)">Importing…</span>';
-  btn.disabled = true;
-
-  const res = await post('/auth/anthropic/import-cli', {});
-  if (res && res.ok) {
-    statusEl.innerHTML = '<span style="color:var(--green)">Connected! Credentials imported.</span>';
-    setTimeout(() => { closeAnthropicModal(); renderSettings(); }, 800);
-  } else {
-    statusEl.innerHTML = `<span style="color:var(--red)">${escHtml(res?.error || 'Import failed.')}</span>`;
-    btn.disabled = false;
-  }
-}
-
-function closeAnthropicModal() {
-  document.getElementById('anthropic-connect-modal')?.remove();
-}
-
-async function disconnectAnthropic() {
-  if (!confirm('Disconnect Anthropic OAuth? The bot will fall back to ANTHROPIC_API_KEY if set.')) return;
-  await del('/auth/anthropic');
-  renderSettings();
-}
 
 async function saveSettings() {
   const raw    = document.getElementById('settings-ta').value;
@@ -2775,7 +2631,7 @@ async function createNewSkill() {
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────
-const AGENT_PROVIDERS = ['anthropic', 'openai', 'ollama'];
+const AGENT_PROVIDERS = ['anthropic', 'openai'];
 
 async function renderAgents() {
   const agents = await get('/api/agents');
@@ -2890,7 +2746,6 @@ function showNewAgentModal() {
           <option value="">Global default</option>
           <option value="anthropic">anthropic</option>
           <option value="openai">openai</option>
-          <option value="ollama">ollama</option>
         </select>
       </div>
       <div class="skill-field">

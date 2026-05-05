@@ -1,25 +1,21 @@
 // Provider dispatcher — routes createMessage() calls to the active LLM backend.
-// Supports Anthropic (default), OpenAI, and Ollama.
-// Runtime provider can be overridden per-process via setRuntimeProvider().
+// Supports Anthropic (API key) and OpenAI (OAuth).
 import Anthropic from "@anthropic-ai/sdk";
 import { settings } from "../../config";
 import { createMessageAnthropic } from "./anthropic";
 import { createMessageOpenAI } from "./openai";
-import { createMessageOllama } from "./ollama";
 
 export { anthropic } from "./anthropic";
 
-// Runtime overrides — applied immediately without a restart.
-// null = fall back to the value loaded from settings.json at startup.
-let runtimeProvider: "anthropic" | "openai" | "ollama" | null = null;
+let runtimeProvider: "anthropic" | "openai" | null = null;
 let runtimeModel: string | null = null;
 
-export function setRuntimeProvider(p: "anthropic" | "openai" | "ollama" | null): void {
+export function setRuntimeProvider(p: "anthropic" | "openai" | null): void {
   runtimeProvider = p;
 }
 
-export function getActiveProvider(): "anthropic" | "openai" | "ollama" {
-  return runtimeProvider ?? settings.provider;
+export function getActiveProvider(): "anthropic" | "openai" {
+  return runtimeProvider ?? (settings.provider as "anthropic" | "openai");
 }
 
 export function setRuntimeModel(model: string | null): void {
@@ -32,7 +28,7 @@ export function getActiveModel(): string {
 
 export interface MessageOverrides {
   model?: string;
-  provider?: "anthropic" | "openai" | "ollama";
+  provider?: "anthropic" | "openai";
 }
 
 export async function createMessage(
@@ -41,7 +37,6 @@ export async function createMessage(
 ): Promise<Anthropic.Message> {
   const provider = overrides?.provider ?? getActiveProvider();
   const resolved = overrides?.model ? { ...params, model: overrides.model } : params;
-  if (provider === "openai")  return createMessageOpenAI(resolved);
-  if (provider === "ollama")  return createMessageOllama(resolved);
+  if (provider === "openai") return createMessageOpenAI(resolved);
   return createMessageAnthropic(resolved);
 }

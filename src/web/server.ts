@@ -11,10 +11,7 @@ import { createOAuthRouter } from "../google/oauth";
 import { isGoogleConnected } from "../google/auth";
 import { createOpenAIRouter } from "../openai/oauth";
 import { isOpenAIConnected } from "../openai/auth";
-import { createAnthropicRouter } from "../anthropic/oauth";
-import { isAnthropicOAuthConnected } from "../anthropic/auth";
 import { setRuntimeProvider, getActiveProvider, setRuntimeModel, getActiveModel } from "../agent/providers";
-import { getOllamaMode } from "../agent/providers/ollama";
 import {
   listSkills,
   loadSkill,
@@ -31,30 +28,6 @@ const ROOT = process.cwd();
 const cfgPath = (f: string) => join(ROOT, "config", f);
 const memPath = (f: string) => join(ROOT, "config", f);
 
-function getRawOllamaUrl(): string {
-  const raw = (process.env.OLLAMA_BASE_URL ?? "").replace(/\/$/, "");
-  return raw || (getOllamaMode() === "url" ? "http://localhost:11434" : "");
-}
-
-async function isOllamaReachable(): Promise<boolean> {
-  try {
-    const mode = getOllamaMode();
-    const rawUrl = getRawOllamaUrl();
-    if (!rawUrl) return false;
-    if (mode === "url") {
-      const r = await fetch(`${rawUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
-      return r.ok;
-    } else {
-      const headers: Record<string, string> = {};
-      if (process.env.OLLAMA_API_KEY) headers["Authorization"] = `Bearer ${process.env.OLLAMA_API_KEY}`;
-      const base = rawUrl.replace(/\/v1$/, "");
-      const r = await fetch(`${base}/api/tags`, { headers, signal: AbortSignal.timeout(2000) });
-      return r.ok;
-    }
-  } catch {
-    return false;
-  }
-}
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -185,44 +158,31 @@ ensureConfigDefaults();
 ensureMainSkill();
 
 // ── Setup endpoints (always accessible — registered before auth middleware) ──
-app.get("/setup/status", async (_req, res) => {
-  const ollamaOk = await isOllamaReachable();
-  let cfgProvider = "anthropic";
-  try { cfgProvider = (JSON.parse(readText(cfgPath("settings.json"))) as Record<string, string>).provider ?? "anthropic"; } catch {}
+app.get("/setup/status", (_req, res) => {
   res.json({
-    needsSetup: !process.env.TELEGRAM_BOT_TOKEN ||
-      (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected() && cfgProvider !== "ollama"),
+    needsSetup: !process.env.TELEGRAM_BOT_TOKEN || (!process.env.ANTHROPIC_API_KEY && !isOpenAIConnected()),
     telegram:  !!process.env.TELEGRAM_BOT_TOKEN,
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     openai:    isOpenAIConnected(),
-    ollama:    ollamaOk,
   });
 });
 
 app.put("/setup/core", (req, res) => {
-  const { telegramToken, anthropicKey, ollamaUrl, ollamaApiKey, ollamaModel, provider, allowedUserIds, adminToken } =
+  const { telegramToken, anthropicKey, provider, allowedUserIds, adminToken } =
     req.body as Record<string, string>;
   const updates: Record<string, string> = {};
   if (telegramToken)                updates["TELEGRAM_BOT_TOKEN"] = telegramToken;
   if (anthropicKey)                 updates["ANTHROPIC_API_KEY"]  = anthropicKey;
-  if (ollamaUrl)                    updates["OLLAMA_BASE_URL"]     = ollamaUrl;
-  if (ollamaApiKey)                 updates["OLLAMA_API_KEY"]      = ollamaApiKey;
   if (allowedUserIds !== undefined) updates["ALLOWED_USER_IDS"]   = allowedUserIds;
   if (adminToken)                   updates["WEB_ADMIN_TOKEN"]     = adminToken;
   try {
     updateEnvFile(updates);
-    if (provider && ["anthropic", "openai", "ollama"].includes(provider)) {
-      const defaultModels: Record<string, string> = {
-        anthropic: "claude-sonnet-4-6",
-        openai:    "gpt-4o",
-        ollama:    "llama3.2",
-      };
+    if (provider && ["anthropic", "openai"].includes(provider)) {
+      const defaultModels: Record<string, string> = { anthropic: "claude-sonnet-4-6", openai: "gpt-4o" };
       let cfg: Record<string, unknown> = {};
       try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
       cfg.provider = provider;
-      if (provider === "ollama" && ollamaModel) {
-        cfg.model = ollamaModel;
-      } else if (!cfg.model || cfg.model === "claude-sonnet-4-6" && provider !== "anthropic") {
+      if (!cfg.model || (cfg.model === "claude-sonnet-4-6" && provider !== "anthropic")) {
         cfg.model = defaultModels[provider];
       }
       writeText(cfgPath("settings.json"), JSON.stringify(cfg, null, 2));
@@ -280,45 +240,34 @@ app.get("/api/status", (_req, res) => {
 
 // ── Provider ─────────────────────────────────────────────────────────────────
 
-app.get("/api/provider", async (_req, res) => {
+app.get("/api/provider", (_req, res) => {
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
-  const ollamaOk = await isOllamaReachable();
   res.json({
     active:         getActiveProvider(),
     default:        cfg.provider ?? "anthropic",
     model:          getActiveModel(),
     anthropicReady: !!process.env.ANTHROPIC_API_KEY,
-    anthropicOAuth: isAnthropicOAuthConnected(),
     openaiReady:    isOpenAIConnected(),
-    ollamaReady:     ollamaOk,
-    ollamaMode:      getOllamaMode(),
-    ollamaBaseUrl:   process.env.OLLAMA_BASE_URL ?? "",
-    ollamaHasUrl:    !!process.env.OLLAMA_BASE_URL,
-    ollamaApiKeySet: !!process.env.OLLAMA_API_KEY,
   });
 });
 
-app.post("/api/provider/switch", async (req, res) => {
+app.post("/api/provider/switch", (req, res) => {
   const { provider } = req.body as { provider?: string };
-  if (!["anthropic", "openai", "ollama"].includes(provider ?? "")) {
-    res.status(400).json({ error: "provider must be 'anthropic', 'openai', or 'ollama'" });
+  if (!["anthropic", "openai"].includes(provider ?? "")) {
+    res.status(400).json({ error: "provider must be 'anthropic' or 'openai'" });
     return;
   }
   if (provider === "openai" && !isOpenAIConnected()) {
     res.status(400).json({ error: "OpenAI is not authenticated yet." });
     return;
   }
-  if (provider === "anthropic" && !process.env.ANTHROPIC_API_KEY && !isAnthropicOAuthConnected()) {
-    res.status(400).json({ error: "Anthropic has no API key or OAuth token." });
-    return;
-  }
-  if (provider === "ollama" && !(await isOllamaReachable())) {
-    res.status(400).json({ error: `Ollama is not reachable at ${getRawOllamaUrl()}. Make sure it's running.` });
+  if (provider === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
+    res.status(400).json({ error: "Anthropic API key not set." });
     return;
   }
 
-  setRuntimeProvider(provider as "anthropic" | "openai" | "ollama");
+  setRuntimeProvider(provider as "anthropic" | "openai");
 
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
@@ -332,15 +281,13 @@ app.post("/api/provider/switch", async (req, res) => {
 app.post("/api/provider/model", (req, res) => {
   const { provider, model } = req.body as { provider?: string; model?: string };
   if (!provider || !model) { res.status(400).json({ error: "provider and model required" }); return; }
-  if (!["anthropic", "openai", "ollama"].includes(provider)) {
+  if (!["anthropic", "openai"].includes(provider)) {
     res.status(400).json({ error: "unknown provider" }); return;
   }
 
-  // Apply live — no restart needed
   setRuntimeModel(model);
-  setRuntimeProvider(provider as "anthropic" | "openai" | "ollama");
+  setRuntimeProvider(provider as "anthropic" | "openai");
 
-  // Persist to settings.json
   let cfg: Record<string, unknown> = {};
   try { cfg = JSON.parse(readText(cfgPath("settings.json"))); } catch {}
   cfg.model = model;
@@ -352,34 +299,11 @@ app.post("/api/provider/model", (req, res) => {
 });
 
 app.put("/api/provider/apikey", (req, res) => {
-  const { provider, key } = req.body as { provider?: string; key?: string };
-  if (!provider || !key) { res.status(400).json({ error: "provider and key required" }); return; }
-  let envKey: string;
-  if (provider === "anthropic")      envKey = "ANTHROPIC_API_KEY";
-  else if (provider === "ollama")    envKey = "OLLAMA_API_KEY";
-  else { res.status(400).json({ error: "API keys can only be set for anthropic and ollama" }); return; }
-  updateEnvFile({ [envKey]: key });
-  process.env[envKey] = key;
-  log.info(`${envKey} updated via web admin.`);
-  res.json({ ok: true });
-});
-
-app.put("/api/provider/baseurl", (req, res) => {
-  const { provider, url } = req.body as { provider?: string; url?: string };
-  if (!provider || !url) { res.status(400).json({ error: "provider and url required" }); return; }
-  if (provider !== "ollama") { res.status(400).json({ error: "Only ollama supports base URL config" }); return; }
-  updateEnvFile({ OLLAMA_BASE_URL: url });
-  process.env.OLLAMA_BASE_URL = url;
-  log.info(`OLLAMA_BASE_URL updated to ${url} via web admin.`);
-  res.json({ ok: true });
-});
-
-app.put("/api/provider/ollamamode", (req, res) => {
-  const { mode } = req.body as { mode?: string };
-  if (mode !== "url" && mode !== "apikey") { res.status(400).json({ error: "mode must be 'url' or 'apikey'" }); return; }
-  updateEnvFile({ OLLAMA_MODE: mode });
-  process.env.OLLAMA_MODE = mode;
-  log.info(`OLLAMA_MODE set to ${mode} via web admin.`);
+  const { key } = req.body as { key?: string };
+  if (!key) { res.status(400).json({ error: "key required" }); return; }
+  updateEnvFile({ ANTHROPIC_API_KEY: key });
+  process.env.ANTHROPIC_API_KEY = key;
+  log.info("ANTHROPIC_API_KEY updated via web admin.");
   res.json({ ok: true });
 });
 
@@ -825,24 +749,6 @@ app.get("/api/provider/models", async (req, res) => {
         .filter((id: string) => id.startsWith("gpt-") || /^o\d/.test(id) || id.startsWith("codex"))
         .sort();
       res.json({ models });
-    } else if (provider === "ollama") {
-      const mode = getOllamaMode();
-      const rawUrl = getRawOllamaUrl();
-      if (!rawUrl) { res.json({ models: [] }); return; }
-      if (mode === "url") {
-        const r = await fetch(`${rawUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-        if (!r.ok) { res.json({ models: [] }); return; }
-        const data = await r.json() as { models?: { name: string }[] };
-        res.json({ models: (data.models ?? []).map((m: { name: string }) => m.name) });
-      } else {
-        const headers: Record<string, string> = {};
-        if (process.env.OLLAMA_API_KEY) headers["Authorization"] = `Bearer ${process.env.OLLAMA_API_KEY}`;
-        const base = rawUrl.endsWith("/v1") ? rawUrl : `${rawUrl}/v1`;
-        const r = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(3000) });
-        if (!r.ok) { res.json({ models: [] }); return; }
-        const data = await r.json() as { data?: { id: string }[] };
-        res.json({ models: (data.data ?? []).map((m: { id: string }) => m.id) });
-      }
     } else {
       res.status(400).json({ error: "unknown provider" });
     }
@@ -861,7 +767,6 @@ app.post("/api/restart", (_req, res) => {
 // ── OAuth routes ──────────────────────────────────────────────────────────────
 app.use(createOAuthRouter(PORT));
 app.use(createOpenAIRouter(PORT));
-app.use(createAnthropicRouter(PORT));
 
 // ── Serve SPA ─────────────────────────────────────────────────────────────────
 // Static files from src/web/public (index.html + assets)
