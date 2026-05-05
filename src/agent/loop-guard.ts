@@ -14,7 +14,7 @@ function fingerprint(name: string, input: unknown): string {
 }
 
 export class LoopGuard {
-  private fingerprints: string[] = [];
+  private counts = new Map<string, number>();
   warned = false;
   exceeded = false;
 
@@ -22,22 +22,20 @@ export class LoopGuard {
   observe(blocks: Anthropic.ContentBlock[]): boolean {
     for (const block of blocks) {
       if (block.type !== "tool_use") continue;
-      this.fingerprints.push(fingerprint(block.name, block.input));
-    }
+      const fp = fingerprint(block.name, block.input);
+      const n = (this.counts.get(fp) ?? 0) + 1;
+      this.counts.set(fp, n);
+      const toolName = block.name;
 
-    const window = this.fingerprints.slice(-settings.tool_loop_max);
-    const last = window[window.length - 1];
-    if (!last) return false;
-    const sameRunLength = window.filter((f) => f === last).length;
-
-    if (!this.warned && sameRunLength >= settings.tool_loop_warn) {
-      this.warned = true;
-      log.warn(`Tool-loop guard: ${last.split("::")[0]} called ${sameRunLength}x with same input`);
-    }
-    if (sameRunLength >= settings.tool_loop_max) {
-      this.exceeded = true;
-      log.error(`Tool-loop guard: aborting — ${last.split("::")[0]} called ${sameRunLength}x with same input`);
-      return true;
+      if (!this.warned && n >= settings.tool_loop_warn) {
+        this.warned = true;
+        log.warn(`Tool-loop guard: ${toolName} called ${n}x with same input`);
+      }
+      if (n >= settings.tool_loop_max) {
+        this.exceeded = true;
+        log.error(`Tool-loop guard: aborting — ${toolName} called ${n}x with same input`);
+        return true;
+      }
     }
     return false;
   }

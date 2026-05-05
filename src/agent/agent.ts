@@ -313,7 +313,8 @@ export async function chatOnce(
     tools: withCachedTools(getTools()),
   });
 
-  let response = await createMessage(baseParams([{ role: "user", content: userMessage }]));
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: userMessage }];
+  let response = await createMessage(baseParams(messages));
 
   // Minimal tool loop — tools still work but nothing is persisted to main history
   let toolsRan = false;
@@ -338,11 +339,10 @@ export async function chatOnce(
 
     const toolResults = await executeTools(response.content, ctx);
 
-    response = await createMessage(baseParams([
-      { role: "user", content: userMessage },
-      { role: "assistant", content: assistantContent },
-      { role: "user", content: toolResults },
-    ]));
+    messages.push({ role: "assistant", content: assistantContent });
+    messages.push({ role: "user", content: toolResults });
+
+    response = await createMessage(baseParams(messages));
   }
 
   const text = response.content
